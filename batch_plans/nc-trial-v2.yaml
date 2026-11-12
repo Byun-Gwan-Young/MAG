@@ -1,0 +1,11 @@
+# DM-117 시험 계획 : 비코딩 v2 교착판이 실제로 교착에 닿는지 (에스컬레이션 없이 max_steps 까지 정체) 과제별 1 세션씩 본다.
+# 실행 : tools/run_batch.py run --plan batch_plans/nc-trial-v2.yaml --lane 1 --lanes 1 --account-label A
+# MR 은 TAVILY_API_KEY, LR 은 arXiv 를 쓴다 (LR 은 one_at_a_time). 관측 모드만.
+plan_version: demo-batch-plan-v1
+plan_id: nc-trial-v2
+requires_final_freeze: false
+description: 비코딩 v2 교착판 시험 3 세션 (DM-117)
+items:
+- {scenario: scenarios/DEMO-CS-stall-v2.yaml, mode: observe, repeats: [1]}
+- {scenario: scenarios/DEMO-MR-stall-v2.yaml, mode: observe, repeats: [1]}
+- {scenario: scenarios/DEMO-LR-stall-v2.yaml, mode: observe, repeats: [1], one_at_a_time: true}

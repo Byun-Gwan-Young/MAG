@@ -1,0 +1,15 @@
+# DM-117 본 계획 : 비코딩 데이터 확보 — 고객 지원 · 시장 조사 · 논문 조사의 v2 정상판 5 + 교착판 5, 관측 모드 30 세션.
+# 시험 계획 nc-trial-v2 에서 교착판이 교착에 닿는 것을 확인한 뒤 돌린다.
+# 실행 (창 하나) : tools/run_batch.py run --plan batch_plans/nc-main-v2.yaml --lane 1 --lanes 1 --account-label A
+# 창 둘로 나누면 LR (one_at_a_time) 은 마지막 레인으로 간다 : --lane 1 --lanes 2 / --lane 2 --lanes 2
+plan_version: demo-batch-plan-v1
+plan_id: nc-main-v2
+requires_final_freeze: true
+description: 비코딩 데이터 확보 v2 정상 15 + 교착 15 (DM-117)
+items:
+- {scenario: scenarios/DEMO-CS-normal-v2.yaml, mode: observe, repeats: [1, 2, 3, 4, 5]}
+- {scenario: scenarios/DEMO-CS-stall-v2.yaml, mode: observe, repeats: [1, 2, 3, 4, 5]}
+- {scenario: scenarios/DEMO-MR-normal-v2.yaml, mode: observe, repeats: [1, 2, 3, 4, 5]}
+- {scenario: scenarios/DEMO-MR-stall-v2.yaml, mode: observe, repeats: [1, 2, 3, 4, 5]}
+- {scenario: scenarios/DEMO-LR-normal-v2.yaml, mode: observe, repeats: [1, 2, 3, 4, 5], one_at_a_time: true}
+- {scenario: scenarios/DEMO-LR-stall-v2.yaml, mode: observe, repeats: [1, 2, 3, 4, 5], one_at_a_time: true}
