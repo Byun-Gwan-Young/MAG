@@ -130,7 +130,7 @@ class CaddyAndUnit(unittest.TestCase):
         # DM-108 : /api/auth/* and /api/projects* must not fall into the query API's /api/*.
         # C-19-10 : /login is the React screen now, not the backend template.
         self.assertEqual(re.findall(r'^@backend path (.+)$', self.code, re.M),
-                         ['/api/auth/* /api/projects /api/projects/*'])
+                         ['/api/auth/* /api/projects /api/projects/* /api/keys/*'])   # C-19-8K : key revoke
         self.assertIn('handle @backend {\nreverse_proxy 127.0.0.1:8030\n}', self.code)
         self.assertLess(self.code.index('handle @backend'), self.code.index('handle @api'))
         for header in ('Strict-Transport-Security', 'X-Content-Type-Options', 'X-Frame-Options', 'Referrer-Policy'):

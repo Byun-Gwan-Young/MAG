@@ -27,6 +27,48 @@ class ProjectResponse(BaseModel):
     created_at: datetime
 
 
+class CsrfRequest(BaseModel):
+    """C-19-8K : a state-changing request that carries only the session's CSRF token."""
+    model_config = ConfigDict(extra="forbid")
+
+    csrf_token: str = Field(min_length=1, max_length=256)
+
+
+class ProjectModeRequest(CsrfRequest):
+    mode: Literal["observe", "block"]
+
+
+class ApiKeyIssueRequest(CsrfRequest):
+    name: str = Field(min_length=1, max_length=100)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def strip_name(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+
+class ApiKeyResponse(BaseModel):
+    """Key metadata only : never the raw key or its hash."""
+    id: int
+    project_id: int
+    key_prefix: str
+    name: str | None
+    created_at: datetime
+    last_used_at: datetime | None
+    revoked_at: datetime | None
+    revoked: bool
+
+
+class ApiKeyIssueResponse(ApiKeyResponse):
+    # The raw key, in this one response only (C-19-8K, DM-92 ③). Not stored, not logged.
+    api_key: str
+
+
+class ApiKeyRevokeResponse(BaseModel):
+    id: int
+    revoked: bool
+
+
 class SessionDetailResponse(BaseModel):
     id: str
     scenario_id: int

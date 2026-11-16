@@ -81,6 +81,9 @@ deletion_requested_at, deletion_due_at, can_restore, csrf_token을 반환합니�
 | POST /api/projects | 본인 소유 프로젝트 생성. 아래 생성 예시 참고 |
 | GET /api/projects/{project_id}/sessions?limit=20&offset=0 | 세션 목록·페이지네이션 |
 | GET /api/projects/{project_id}/sessions/{session_id} | 선택한 세션의 상세 |
+| PATCH /api/projects/{project_id} | 모드 바꾸기 `{mode: observe·block, csrf_token}` (C-19-8K) |
+| GET · POST /api/projects/{project_id}/keys | 키 목록 · 발급 `{name, csrf_token}`. 발급 응답의 `api_key` 원문은 이때 한 번만 (C-19-8K) |
+| POST /api/keys/{key_id}/revoke | 키 폐기 `{csrf_token}` (C-19-8K) |
 | GET /api/auth/me | 로그인 사용자와 계정 상태 조회 |
 
 fetch 요청에는 credentials: 'include'를 사용합니다. 조회 응답 필드·nullable 값·구조는 http://localhost:8030/docs를 확인하세요.
@@ -225,6 +228,7 @@ backend/
 ├── routers/
 │   ├── auth.py               # 로그인 화면과 인증 API
 │   ├── projects.py           # 소유 프로젝트 목록
+│   ├── keys.py               # API 키 발급·목록·폐기, 프로젝트 모드 (C-19-8K, storage/accounts.py 만)
 │   └── sessions.py           # 프로젝트별 실행 기록 목록·상세
 ├── repositories/
 │   ├── projects.py           # 소유권 조건을 포함한 프로젝트 SQL
@@ -351,6 +355,9 @@ allowed_emails 확인 → users 생성·갱신 + auth_events 성공 기록
 | GET | `/api/projects` | 로그인 사용자 소유 프로젝트 목록 |
 | GET | `/api/projects/{project_id}/sessions` | 소유 프로젝트 실행 기록 목록 |
 | GET | `/api/projects/{project_id}/sessions/{session_id}` | 소유 프로젝트 실행 기록 상세 |
+| PATCH | `/api/projects/{project_id}` | 소유 프로젝트 모드 (observe · block). 남의 것 404, 데모 프로젝트 403 |
+| GET · POST | `/api/projects/{project_id}/keys` | 키 목록 · 발급 (원문은 발급 응답에 한 번만, DB 에는 SHA-256 만). 남의 것 404, 데모 프로젝트 403 |
+| POST | `/api/keys/{key_id}/revoke` | 소유 프로젝트 키 폐기. 그 밖의 키는 404 |
 | GET | `/healthz` | DB 연결 확인 |
 
 `/api/auth/me`는 `id`, `sub`, `email`, `name`을 반환합니다.
