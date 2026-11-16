@@ -187,9 +187,7 @@ export default function App() {
         <main id="main-content">
           <div className="page-heading">
             <div>
-              <p className="eyebrow">
-                MAG / {current.page.toUpperCase()}
-              </p>
+              <p className="eyebrow">MAG / {current.page.toUpperCase()}</p>
               <h1>{title}</h1>
               <p>멀티에이전트 실험의 진행과 판정 근거를 함께 살펴보세요.</p>
             </div>
@@ -213,7 +211,7 @@ export default function App() {
           ) : current.page === "projects" ? (
             <Projects user={auth.data} preview={preview} />
           ) : current.page === "keys" ? (
-            <KeysPage />
+            <KeysPage user={auth.data} preview={preview} />
           ) : (
             <DataPages current={current} preview={preview} />
           )}

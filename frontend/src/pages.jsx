@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleHelp,
+  Copy,
   Database,
   Download,
   ExternalLink,
@@ -20,9 +21,10 @@ import {
   Search,
   ShieldCheck,
   Square,
+  Trash2,
   Workflow,
 } from "lucide-react";
-import { logout, post, request } from "./api.js";
+import { logout, patch, post, request } from "./api.js";
 import {
   Badge,
   Empty,
@@ -836,12 +838,15 @@ export function Guide({ data, open }) {
       "프로젝트 메뉴에서 이름과 관측·차단 모드를 선택하세요. 본인 소유의 프로젝트만 조회됩니다.",
     ],
     [
-      "API 키와 연동 확인",
-      "현재 main에는 API 키 관리 HTTP API가 없습니다. 키 발급은 백엔드 담당자와 확인하세요.",
+      "API 키 발급",
+      "API 키 메뉴에서 프로젝트를 고르고 키 이름을 넣어 발급하세요. 키 원문은 발급할 때 한 번만 보이므로 바로 복사해 두고, 필요 없어진 키는 폐기하세요.",
+      null,
+      "#keys",
     ],
     [
       "모델 호출 주소 연결",
       `프록시 주소와 ${data.system.session_header} 헤더를 실행기에 설정합니다. 이 화면에서 실행기를 시작하지 않습니다.`,
+      "서버 게이트웨이 준비 중",
     ],
     [
       "작업 근거 전송",
@@ -863,12 +868,19 @@ export function Guide({ data, open }) {
         subtitle="설정부터 기록 확인까지, 현재 제공되는 기능을 기준으로 안내합니다."
       >
         <div className="guide-steps">
-          {steps.map(([title, text], i) => (
+          {steps.map(([title, text, pending, link], i) => (
             <div key={title}>
               <span>{String(i + 1).padStart(2, "0")}</span>
               <div>
-                <h3>{title}</h3>
+                <h3>
+                  {title} {pending && <span className="badge">{pending}</span>}
+                </h3>
                 <p>{text}</p>
+                {link && (
+                  <a href={link}>
+                    바로 가기 <ArrowRight size={13} />
+                  </a>
+                )}
               </div>
             </div>
           ))}
@@ -1042,6 +1054,24 @@ export function Projects({ user, preview }) {
     setOffset(0);
     setDetail(null);
   };
+  // C-19-8K: change the selected project's mode (observe · block).
+  const [modeBusy, setModeBusy] = useState(false);
+  const changeMode = async (next) => {
+    setModeBusy(true);
+    setError(null);
+    try {
+      await patch(`/api/projects/${selected}`, {
+        mode: next,
+        csrf_token: user.csrf_token,
+      });
+      projects.retry();
+    } catch (e) {
+      setError(e);
+    } finally {
+      setModeBusy(false);
+    }
+  };
+  const current = projects.data?.find((p) => p.id === selected);
   const loadDetail = async (id) => {
     setError(null);
     try {
@@ -1129,6 +1159,34 @@ export function Projects({ user, preview }) {
         </Panel>
       </div>
       {error && <ErrorBox error={error} />}
+      {current && (
+        <Panel
+          title="프로젝트 모드"
+          subtitle={`${current.name} · 가드레일이 STOP 을 낸 뒤 요청을 어떻게 다룰지 정합니다.`}
+        >
+          <div
+            className="mode-switch"
+            role="radiogroup"
+            aria-label="프로젝트 모드"
+          >
+            {[
+              ["observe", "관측", "판정만 기록하고 요청은 그대로 보냅니다."],
+              ["block", "차단", "STOP 뒤의 모델 요청을 403 으로 막습니다."],
+            ].map(([value, title, text]) => (
+              <button
+                key={value}
+                role="radio"
+                aria-checked={current.mode === value}
+                disabled={modeBusy || current.mode === value}
+                onClick={() => changeMode(value)}
+              >
+                <b>{title}</b>
+                <small>{text}</small>
+              </button>
+            ))}
+          </div>
+        </Panel>
+      )}
       {selected && (
         <Panel
           title="프로젝트 세션"
@@ -1332,29 +1390,227 @@ export function Account({ user, preview, refresh }) {
   );
 }
 
-export function KeysPage() {
-  return (
-    <Panel
-      title="API 키 관리"
-      subtitle="현재 main에 제공된 서버 기능을 기준으로 표시합니다."
-    >
-      <div className="feature-pending">
-        <span className="feature-icon">
-          <KeyRound size={32} />
-        </span>
-        <span className="badge">서버 API 미제공</span>
-        <h3>키 관리 API 연결이 필요합니다</h3>
-        <p>
-          현재 백엔드에는 API 키 발급·조회·폐기 HTTP 엔드포인트가 없습니다.
-          <br />
-          키를 임의로 생성하거나 저장하지 않습니다. 백엔드 API가 제공되면
-          프로젝트 소유권과 인증 규격에 맞춰 연결해야 합니다.
+// C-19-8K: guardrail API keys of one of the user's projects. The raw key is in the issue
+// response only: it lives in this component's state until the user closes the box or leaves
+// the page, and is never written to storage, the URL or the console.
+export function KeysPage({ user, preview }) {
+  const projects = useResource(
+    (signal) =>
+      preview ? Promise.resolve([]) : request("/api/projects", { signal }),
+    [preview],
+  );
+  const [chosen, setChosen] = useState(null);
+  const projectId = chosen ?? projects.data?.[0]?.id ?? null;
+  const keys = useResource(
+    (signal) =>
+      projectId == null
+        ? Promise.resolve([])
+        : request(`/api/projects/${projectId}/keys`, { signal }),
+    [projectId],
+  );
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [issued, setIssued] = useState(null);
+  const [copied, setCopied] = useState(false);
+  const choose = (id) => {
+    setChosen(id);
+    setIssued(null);
+    setError(null);
+  };
+  const issue = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    setCopied(false);
+    try {
+      setIssued(
+        await post(`/api/projects/${projectId}/keys`, {
+          name: name.trim(),
+          csrf_token: user.csrf_token,
+        }),
+      );
+      setName("");
+      keys.retry();
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const revoke = async (key) => {
+    if (
+      !window.confirm(
+        `'${key.name || key.key_prefix}' 키를 폐기할까요? 폐기한 키로 보낸 요청은 거절되고, 되돌릴 수 없습니다.`,
+      )
+    )
+      return;
+    setError(null);
+    try {
+      await post(`/api/keys/${key.id}/revoke`, { csrf_token: user.csrf_token });
+      if (issued?.id === key.id) setIssued(null);
+      keys.retry();
+    } catch (e) {
+      setError(e);
+    }
+  };
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(issued.api_key);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+      setError(
+        new Error("복사하지 못했습니다. 키를 직접 선택해 복사해 주세요."),
+      );
+    }
+  };
+  if (preview)
+    return (
+      <Panel title="API 키 관리">
+        <Empty title="API 키 관리에는 로그인이 필요합니다">
+          미리보기에서는 키를 발급하거나 조회하지 않습니다.
+        </Empty>
+      </Panel>
+    );
+  if (projects.loading) return <Loading />;
+  if (projects.error)
+    return <ErrorBox error={projects.error} retry={projects.retry} />;
+  if (!projects.data.length)
+    return (
+      <Panel title="API 키 관리">
+        <Empty title="키를 발급할 프로젝트가 없습니다">
+          키는 프로젝트마다 발급합니다. 먼저 프로젝트를 만들어 주세요.
+        </Empty>
+        <p className="keys-link">
+          <a href="#projects">
+            프로젝트 만들기
+            <ArrowRight size={15} />
+          </a>
         </p>
-        <a href="#projects">
-          프로젝트 확인
-          <ArrowRight size={15} />
-        </a>
+      </Panel>
+    );
+  const project = projects.data.find((p) => p.id === projectId);
+  return (
+    <div className="stack">
+      <div className="grid-two">
+        <Panel
+          title="프로젝트 고르기"
+          subtitle="키는 프로젝트마다 따로 발급하고 폐기합니다."
+        >
+          <div className="project-list">
+            {projects.data.map((p) => (
+              <button
+                className={projectId === p.id ? "selected-project" : ""}
+                key={p.id}
+                onClick={() => choose(p.id)}
+              >
+                <span className="project-symbol">
+                  <Layers size={20} />
+                </span>
+                <span>
+                  <b>{p.name}</b>
+                  <small>
+                    {label(p.mode)} · {p.rule_id}
+                  </small>
+                </span>
+                <ChevronRight size={17} />
+              </button>
+            ))}
+          </div>
+        </Panel>
+        <Panel
+          title="새 키 발급"
+          subtitle={project ? `${project.name} 프로젝트` : undefined}
+        >
+          <form onSubmit={issue} className="form">
+            <label>
+              키 이름
+              <input
+                maxLength={100}
+                required
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="예: 실험 실행기"
+              />
+            </label>
+            <button className="primary" disabled={busy || !name.trim()}>
+              <KeyRound size={16} />
+              {busy ? "발급 중…" : "키 발급"}
+            </button>
+          </form>
+        </Panel>
       </div>
-    </Panel>
+      {issued && (
+        <section className="key-reveal" role="status">
+          <div>
+            <b>새 키 · {issued.name}</b>
+            <p>
+              이 키는 지금 한 번만 보여 드립니다. 창을 닫으면 다시 볼 수
+              없습니다. 안전한 곳에 복사해 두세요.
+            </p>
+          </div>
+          <code className="mono" aria-label="새 API 키">
+            {issued.api_key}
+          </code>
+          <div className="actions">
+            <button className="primary" onClick={copy}>
+              {copied ? <Check size={15} /> : <Copy size={15} />}
+              {copied ? "복사됨" : "복사"}
+            </button>
+            <button onClick={() => setIssued(null)}>확인했습니다</button>
+          </div>
+        </section>
+      )}
+      {error && <ErrorBox error={error} />}
+      <Panel
+        title="발급한 키"
+        subtitle="키 원문은 서버에 남기지 않습니다. 앞자리로만 구분합니다."
+      >
+        {keys.loading ? (
+          <Loading />
+        ) : keys.error ? (
+          <ErrorBox error={keys.error} retry={keys.retry} />
+        ) : keys.data.length ? (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>이름</th>
+                  <th>앞자리</th>
+                  <th>만든 날</th>
+                  <th>마지막 사용</th>
+                  <th>상태</th>
+                </tr>
+              </thead>
+              <tbody>
+                {keys.data.map((k) => (
+                  <tr key={k.id}>
+                    <td>{k.name || "—"}</td>
+                    <td className="mono">gk_{k.key_prefix}_…</td>
+                    <td>{date(k.created_at)}</td>
+                    <td>{k.last_used_at ? date(k.last_used_at) : "사용 전"}</td>
+                    <td>
+                      {k.revoked ? (
+                        <span className="badge blocked">
+                          폐기 {date(k.revoked_at)}
+                        </span>
+                      ) : (
+                        <button className="danger" onClick={() => revoke(k)}>
+                          <Trash2 size={14} />
+                          폐기
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <Empty title="이 프로젝트에 발급한 키가 없습니다" />
+        )}
+      </Panel>
+    </div>
   );
 }

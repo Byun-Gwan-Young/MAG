@@ -43,6 +43,14 @@ export const post = (path, body) =>
     body: JSON.stringify(body),
   });
 
+// C-19-8K: PATCH /api/projects/{id} (project mode).
+export const patch = (path, body) =>
+  request(path, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
 // C-19-10 (DM-114): sign out with the per-session CSRF token /api/auth/me returned.
 // The token stays in memory only; never copy it to storage or logs.
 export async function logout(csrfToken) {

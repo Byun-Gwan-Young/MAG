@@ -1230,6 +1230,61 @@ footer {
   border-color: var(--orange);
   background: var(--selected);
 }
+/* C-19-8K: project mode switch and the one-time key box */
+.mode-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding: 0 20px 22px;
+}
+.mode-switch button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  text-align: left;
+  padding: 14px 16px;
+}
+.mode-switch button small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.mode-switch button[aria-checked="true"] {
+  border-color: var(--orange);
+  background: var(--selected);
+  opacity: 1;
+  cursor: default;
+}
+.key-reveal {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+  border: 1px solid var(--warn-line);
+  border-left: 4px solid var(--orange);
+  border-radius: 8px;
+  background: var(--warn);
+  color: var(--warn-fg);
+}
+.key-reveal p {
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+.key-reveal code {
+  display: block;
+  padding: 12px 14px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--fg);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.keys-link {
+  padding: 0 20px 22px;
+  text-align: center;
+}
 .form {
   display: flex;
   flex-direction: column;

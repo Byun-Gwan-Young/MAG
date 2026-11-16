@@ -14,17 +14,28 @@ const screens = {
 };
 
 test("browser tab title is MAG", () => {
-  assert.match(screens["index.html"], /<title>MAG · Multi-Agent Guardrail<\/title>/);
+  assert.match(
+    screens["index.html"],
+    /<title>MAG · Multi-Agent Guardrail<\/title>/,
+  );
 });
 
 test("menu and sign-in page show MAG with the subtitle", () => {
   for (const name of ["App.jsx", "Login.jsx"]) {
-    assert.match(screens[name], /MAG\s*<small>Multi-Agent Guardrail<\/small>/, name);
+    assert.match(
+      screens[name],
+      /MAG\s*<small>Multi-Agent Guardrail<\/small>/,
+      name,
+    );
   }
 });
 
 test("old visible names are gone", () => {
   for (const [name, text] of Object.entries(screens)) {
-    assert.doesNotMatch(text, /(?<!multi-)agent[ -]?guardrail(?!-dashboard)|EXPERIMENT CONSOLE|agent<span>/i, name);
+    assert.doesNotMatch(
+      text,
+      /(?<!multi-)agent[ -]?guardrail(?!-dashboard)|EXPERIMENT CONSOLE|agent<span>/i,
+      name,
+    );
   }
 });

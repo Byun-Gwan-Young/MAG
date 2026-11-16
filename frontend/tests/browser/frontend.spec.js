@@ -327,3 +327,119 @@ test("C-19-10: sign-in config from the server, live monitor waits for the gatewa
     page.getByRole("heading", { name: "실험 워크스페이스에 로그인" }),
   ).toBeVisible();
 });
+
+test("C-19-8K: key issue shows the raw key once, list, revoke, project mode, guide", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const raw = "gk_ab12cd34_" + "x".repeat(43);
+  const writes = [];
+  let keys = [];
+  let mode = "observe";
+  await page.route("**/api/**", async (route) => {
+    const req = route.request();
+    const path = new URL(req.url()).pathname;
+    const respond = (body, status = 200) =>
+      route.fulfill({
+        status,
+        contentType: "application/json",
+        body: JSON.stringify(body),
+      });
+    if (path === "/api/auth/me") return respond(user);
+    if (path === "/api/frontend/reference") return respond(data);
+    if (path === "/api/projects")
+      return respond([
+        { id: 5, name: "키 실험", mode, rule_id: "deadlock-v0.3" },
+      ]);
+    if (path === "/api/projects/5/keys" && req.method() === "POST") {
+      writes.push([path, req.postDataJSON()]);
+      const key = {
+        id: 9,
+        project_id: 5,
+        key_prefix: "ab12cd34",
+        name: "실행기",
+        created_at: "2026-11-17T03:00:00Z",
+        last_used_at: null,
+        revoked_at: null,
+        revoked: false,
+      };
+      keys = [key];
+      return respond({ ...key, api_key: raw }, 201);
+    }
+    if (path === "/api/projects/5/keys") return respond(keys);
+    if (path === "/api/keys/9/revoke") {
+      writes.push([path, req.postDataJSON()]);
+      keys = [
+        { ...keys[0], revoked: true, revoked_at: "2026-11-17T04:00:00Z" },
+      ];
+      return respond({ id: 9, revoked: true });
+    }
+    if (path === "/api/projects/5" && req.method() === "PATCH") {
+      writes.push([path, req.postDataJSON()]);
+      mode = req.postDataJSON().mode;
+      return respond({
+        id: 5,
+        name: "키 실험",
+        mode,
+        rule_id: "deadlock-v0.3",
+      });
+    }
+    return respond({ detail: "Not found" }, 404);
+  });
+  await page.goto("/#keys");
+  await expect(
+    page.getByText("이 프로젝트에 발급한 키가 없습니다"),
+  ).toBeVisible();
+  await expect(page.getByText("서버 API 미제공")).toHaveCount(0);
+  await page.getByLabel("키 이름").fill("실행기");
+  await page.getByRole("button", { name: "키 발급", exact: true }).click();
+  await expect(page.getByLabel("새 API 키")).toHaveText(raw);
+  await expect(
+    page.getByText("다시 볼 수 없습니다", { exact: false }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "복사", exact: true }).click();
+  await expect(page.getByRole("button", { name: "복사됨" })).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(raw);
+  await expect(page.locator("td.mono")).toHaveText("gk_ab12cd34_…");
+  await page.getByRole("button", { name: "확인했습니다" }).click();
+  await expect(page.getByText(raw)).toHaveCount(0);
+  expect(await page.content()).not.toContain(raw);
+  expect(
+    await page.evaluate(() =>
+      JSON.stringify({ ...localStorage, ...sessionStorage }),
+    ),
+  ).not.toContain("gk_");
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "폐기", exact: true }).click();
+  await expect(page.locator(".badge.blocked")).toContainText("폐기");
+  await page
+    .getByRole("navigation")
+    .getByRole("button", { name: "프로젝트", exact: true })
+    .click();
+  await page.getByRole("button", { name: /키 실험/ }).click();
+  await expect(page.getByRole("radio", { name: /관측/ })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+  await page.getByRole("radio", { name: /차단/ }).click();
+  await expect(page.getByRole("radio", { name: /차단/ })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+  expect(writes).toEqual([
+    ["/api/projects/5/keys", { name: "실행기", csrf_token: user.csrf_token }],
+    ["/api/keys/9/revoke", { csrf_token: user.csrf_token }],
+    ["/api/projects/5", { mode: "block", csrf_token: user.csrf_token }],
+  ]);
+  await page.goto("/?preview=1#guide");
+  await expect(
+    page.getByRole("heading", { name: /API 키 발급/ }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: /모델 호출 주소 연결/ }),
+  ).toContainText("서버 게이트웨이 준비 중");
+  await expect(page.getByText("API 키 관리 HTTP API가 없습니다")).toHaveCount(
+    0,
+  );
+});
