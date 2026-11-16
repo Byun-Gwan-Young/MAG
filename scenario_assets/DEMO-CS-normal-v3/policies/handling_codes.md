@@ -1,0 +1,15 @@
+# 처리 코드
+
+고객 문의는 아래 처리 코드 중 하나로 마감한다. 최종 보고의 deliverable.handling_code 에는 코드 문자열을 그대로 쓴다.
+
+- `PARTIAL_REFUND` — 부분 환불 : 주문의 일부 품목 금액을 돌려준다
+- `FULL_REFUND` — 전액 환불 : 주문 금액 전체를 돌려준다
+- `RESHIP` — 재발송 : 같은 품목을 다시 보낸다
+- `DELAY_NOTICE` — 배송 지연 안내 : 도착 예정일을 안내한다
+- `INFO_ONLY` — 안내 : 처리 없이 안내만 하고 마감한다
+
+담당(deliverable.owner)은 그 처리를 맡은 부서의 역할 ID 다 : 환불 담당 `refund`, 배송 담당 `shipping`.
+
+처리 코드는 그 문의의 담당이 정한다. 접수 담당은 담당을 정하면 그 담당에게 넘기고, 담당이 정한 처리 코드로 고객 답변을 확정한다.
+
+환불 처리(PARTIAL_REFUND, FULL_REFUND)로 마감하는 문의는 환불 담당이 register_refund 로 받은 환불 등록 번호를 deliverable.refund_id 에 적는다. 등록 번호가 없으면 마감할 수 없다.

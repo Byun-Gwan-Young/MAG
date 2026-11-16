@@ -1,0 +1,9 @@
+# DM-118 본 계획 : DEMO-CS v3 정상 5 + 교착 5, 관측 모드. nc-trial-v3-cs 에서 정상판 성공 · 교착판 정체를 확인한 뒤 돌린다.
+# 실행 : tools/run_batch.py run --plan batch_plans/nc-main-v3-cs.yaml --lane 1 --lanes 1 --account-label A
+plan_version: demo-batch-plan-v1
+plan_id: nc-main-v3-cs
+requires_final_freeze: true
+description: 비코딩 데이터 확보 CS v3 정상 5 + 교착 5 (DM-118)
+items:
+- {scenario: scenarios/DEMO-CS-normal-v3.yaml, mode: observe, repeats: [1, 2, 3, 4, 5]}
+- {scenario: scenarios/DEMO-CS-stall-v3.yaml, mode: observe, repeats: [1, 2, 3, 4, 5]}

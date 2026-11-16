@@ -1,0 +1,8 @@
+# DM-117 시험 계획 (추가) : 고친 CS 교착판(③)이 교착에 닿는지 1 세션 본다. nc-trial-v2 의 CS 는 4 step 성공으로 끝났다.
+# 실행 : tools/run_batch.py run --plan batch_plans/nc-trial-v2-cs.yaml --lane 1 --lanes 1 --account-label A
+plan_version: demo-batch-plan-v1
+plan_id: nc-trial-v2-cs
+requires_final_freeze: false
+description: 고친 비코딩 v2 CS 교착판 시험 1 세션 (DM-117)
+items:
+- {scenario: scenarios/DEMO-CS-stall-v2.yaml, mode: observe, repeats: [1]}

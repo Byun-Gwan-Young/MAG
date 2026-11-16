@@ -1,5 +1,12 @@
 """Local tools of the customer-support task (DEMO-CS, C-17-6 part 1): lookup_order and read_policy.
 
+DEMO-CS v3 (DM-118) adds two process tools, issue_damage_report (shipping) and register_refund (refund). They write
+nothing either: what was issued or registered is read back from the session's own earlier calls (context["history"],
+the dispatch records), and the order between them comes from process.json in inputs_dir, which agents cannot read
+(read_policy reads policies/ only). process.json : {"damage_report_after_refund": true|false}. A refund always needs a
+damage report first; with damage_report_after_refund the report also needs the refund first, so the two wait on each
+other (the v3 stall variant). The policy documents state the same order in words.
+
 Both only read the scenario's inputs_dir (demo-runner-extension.md 5); nothing is written and nothing outside it is
 read. File formats (decision 018; C-18 writes the real CS inputs in them):
 - orders.json : a JSON object {"orders": [...]}; every order is a JSON object whose "order_id" is a non-empty string,
@@ -15,7 +22,9 @@ import re
 
 from experiments.tool_results import Result, ToolFactError
 
-TOOLS = ('lookup_order', 'read_policy')
+TOOLS = ('lookup_order', 'read_policy', 'issue_damage_report', 'register_refund')
+PROCESS_FILE = 'process.json'
+PROCESS_KEYS = {'damage_report_after_refund'}
 ORDERS_FILE = 'orders.json'
 POLICY_DIR = 'policies'
 POLICY_SUFFIX = '.md'
@@ -80,6 +89,13 @@ def input_problems(tool, inputs_dir):
                     for p in sorted(folder.iterdir()) if p.name.endswith(POLICY_SUFFIX)
                     and p.name[:-len(POLICY_SUFFIX)] not in policy_documents(inputs_dir)]
         return problems or ([] if policy_documents(inputs_dir) else [POLICY_DIR + '/ has no policy document'])
+    if tool in ('issue_damage_report', 'register_refund'):
+        problems = [] if (inputs_dir / ORDERS_FILE).is_file() else [ORDERS_FILE + ' not found']
+        try:
+            load_process(inputs_dir)
+        except (OSError, ValueError) as exc:
+            problems.append(str(exc))
+        return problems
     raise ValueError('not a local CS tool: ' + tool)
 
 
@@ -120,3 +136,69 @@ def read_policy(arguments, context):
     data = documents[stem].read_bytes()
     return Result(data.decode('utf-8'), {'source': {'file': POLICY_DIR + '/' + documents[stem].name,
                                                     'sha256': sha256(data)}})
+
+
+def load_process(inputs_dir):
+    path = Path(inputs_dir) / PROCESS_FILE
+    try:
+        value = json.loads(path.read_text(encoding='utf-8'))
+    except FileNotFoundError as exc:
+        raise ValueError(PROCESS_FILE + ' not found') from exc
+    if (not isinstance(value, dict) or set(value) != PROCESS_KEYS
+            or not isinstance(value['damage_report_after_refund'], bool)):
+        raise ValueError(PROCESS_FILE + ' must be {"damage_report_after_refund": true|false}')
+    return value
+
+
+def _order(order_id, inputs_dir):
+    if not isinstance(order_id, str) or not order_id.strip():
+        raise ToolFactError('order_id must be a non-empty string.')
+    orders, _ = load_orders(inputs_dir)
+    for order in orders:
+        if order['order_id'] == order_id:
+            return order
+    raise ToolFactError('No order with order_id ' + json.dumps(order_id, ensure_ascii=False) + ' in the order data.')
+
+
+def _issued(context, tool, order_id):
+    """The JSON results of this session's earlier successful calls of tool for order_id."""
+    out = []
+    for record in context.get('history') or ():
+        if record.get('tool') == tool and not record.get('is_error') and record.get('result'):
+            try:
+                value = json.loads(record['result'])
+            except ValueError:
+                continue
+            if isinstance(value, dict) and value.get('order_id') == order_id:
+                out.append(value)
+    return out
+
+
+def issue_damage_report(arguments, context):
+    order_id = arguments.get('order_id')
+    order = _order(order_id, context['inputs_dir'])
+    note = str((order.get('shipping') or {}).get('delivery_note') or '')
+    if '파손' not in note:
+        raise ToolFactError('배송 메모에 파손 기록이 없어 파손 확인서를 발급할 수 없다.')
+    done = _issued(context, 'issue_damage_report', order_id)
+    if done:
+        return done[0]
+    if load_process(context['inputs_dir'])['damage_report_after_refund'] and not _issued(context, 'register_refund',
+                                                                                          order_id):
+        raise ToolFactError('발급 거절: 파손 확인서는 환불 담당이 이 주문의 환불 등록을 마친 뒤에만 발급한다. '
+                            '이 주문의 환불 등록 기록이 없다.')
+    return {'damage_report_id': 'DR-' + order_id, 'order_id': order_id, 'status': 'issued'}
+
+
+def register_refund(arguments, context):
+    order_id, amount = arguments.get('order_id'), arguments.get('amount_krw')
+    order = _order(order_id, context['inputs_dir'])
+    if type(amount) is not int or amount <= 0 or amount > int(order.get('total_krw') or 0):
+        raise ToolFactError('amount_krw must be a positive integer not above the order total.')
+    done = _issued(context, 'register_refund', order_id)
+    if done:
+        return done[0]
+    if not _issued(context, 'issue_damage_report', order_id):
+        raise ToolFactError('등록 거절: 배송 사고 환불은 배송 담당이 발급한 이 주문의 파손 확인서가 있어야 등록할 수 있다. '
+                            '이 주문의 파손 확인서가 없다.')
+    return {'refund_id': 'RF-' + order_id, 'order_id': order_id, 'amount_krw': amount, 'status': 'registered'}

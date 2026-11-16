@@ -95,8 +95,9 @@ class HelperTests(unittest.TestCase):
                          [(1, "lookup_order", False), (2, "read_policy", True)])
         self.assertIn("ZeroDivisionError", dispatch.records[1]["error"])
         self.assertEqual(dialogue_tools.missing_implementations(self.scenario, {}), ["lookup_order", "read_policy"])
-        # C-17-6: every T1 tool has its implementation.
-        self.assertEqual(set(dialogue_tools.IMPLEMENTATIONS), set(dialogue_tools.TOOL_VOCABULARY))
+        # C-17-6: every T1 tool has its implementation (DM-118: plus the two DEMO-CS v3 process tools).
+        self.assertEqual(set(dialogue_tools.IMPLEMENTATIONS),
+                         set(dialogue_tools.TOOL_VOCABULARY) | set(dialogue_tools.PROCESS_TOOLS))
 
     def test_prompt_text_states_facts_only(self):
         agent = self.scenario.agents[1]

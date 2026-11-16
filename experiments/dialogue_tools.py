@@ -20,12 +20,17 @@ TOOL_VOCABULARY = ('lookup_order', 'read_policy', 'web_search', 'academic_search
 ERROR_CHARS = 300
 # name -> callable. A role naming a tool missing here cannot start a run.
 IMPLEMENTATIONS = {'lookup_order': cs_tools.lookup_order, 'read_policy': cs_tools.read_policy,
-                   'web_search': search_tools.web_search, 'academic_search': search_tools.academic_search}
+                   'web_search': search_tools.web_search, 'academic_search': search_tools.academic_search,
+                   'issue_damage_report': cs_tools.issue_damage_report, 'register_refund': cs_tools.register_refund}
+# DEMO-CS v3 process tools (DM-118). Named in the instruction only for a role that has one, so the text other roles
+# get is unchanged.
+PROCESS_TOOLS = ('issue_damage_report', 'register_refund')
 
 
 def tool_instructions(names):
     """Facts about this role's tools, as the artifact path states them, without the file-tree wording."""
-    return ('Available tool vocabulary is ' + ', '.join(TOOL_VOCABULARY) + '. '
+    vocabulary = TOOL_VOCABULARY + tuple(t for t in PROCESS_TOOLS if t in (names or ()))
+    return ('Available tool vocabulary is ' + ', '.join(vocabulary) + '. '
             'For THIS role only these tools are registered: ' + (', '.join(names) if names else 'none') + '. '
             "Call only this role's registered tools. Do not call any other tool. ")
 
@@ -66,6 +71,8 @@ class ToolDispatch:
             self.records.append(record)
             context = {'step_id': self.step_id, 'agent_id': self.agent_id, 'inputs_dir': self.inputs_dir,
                        **self.resources}
+            if name in PROCESS_TOOLS:
+                context['history'] = [dict(r) for r in self.records[:-1]]
             if self.resources:
                 context['dispatch_seq'] = record['seq']
             try:
@@ -104,7 +111,17 @@ class ToolDispatch:
             ti:, abs: and AND, OR, ANDNOT may be used). Returns JSON results with id (arXiv ID), title, authors,
             year and excerpt; the number of results is set by the task."""
             return self.call('academic_search', {'query': query})
-        available = {f.__name__: f for f in (lookup_order, read_policy, web_search, academic_search)}
+        def issue_damage_report(order_id: str) -> str:
+            """Issue the damage report (파손 확인서) of order_id under the shipping policy. Returns JSON with
+            damage_report_id, or an error result that states why it was refused."""
+            return self.call('issue_damage_report', {'order_id': order_id})
+
+        def register_refund(order_id: str, amount_krw: int) -> str:
+            """Register a refund of amount_krw (KRW) for order_id under the refund policy. Returns JSON with
+            refund_id, or an error result that states why it was refused."""
+            return self.call('register_refund', {'order_id': order_id, 'amount_krw': amount_krw})
+        available = {f.__name__: f for f in (lookup_order, read_policy, web_search, academic_search,
+                                              issue_damage_report, register_refund)}
         return [available[name] for name in names]
 
     def records_for(self, step_id):

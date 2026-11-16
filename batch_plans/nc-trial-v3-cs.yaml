@@ -1,0 +1,9 @@
+# DM-118 시험 계획 : DEMO-CS v3 (순환 승인) 정상판이 도구 순서대로 끝나는지, 교착판이 교착에 닿는지 1 세션씩 본다.
+# 실행 : tools/run_batch.py run --plan batch_plans/nc-trial-v3-cs.yaml --lane 1 --lanes 1 --account-label A
+plan_version: demo-batch-plan-v1
+plan_id: nc-trial-v3-cs
+requires_final_freeze: false
+description: DEMO-CS v3 정상 1 + 교착 1 시험 (DM-118)
+items:
+- {scenario: scenarios/DEMO-CS-normal-v3.yaml, mode: observe, repeats: [1]}
+- {scenario: scenarios/DEMO-CS-stall-v3.yaml, mode: observe, repeats: [1]}

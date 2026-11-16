@@ -1,0 +1,127 @@
+# DEMO-CS-stall-v3 (DM-118) : 순환 승인 교착. v2 교착판은 정책 문장만으로는 교착이 나지 않았다 (시험 3 회 모두 4 step 성공 :
+#   모델이 정책 상충을 기록만 하고 환불 담당으로 해결). v3 는 처리를 도구로 강제한다 (experiments/cs_tools.py) :
+#   배송 담당 issue_damage_report (파손 확인서), 환불 담당 register_refund (환불 등록, 확인서가 있어야 됨).
+#   판정 scenario_judges/DEMO-CS-v3.py : 환불 코드 + 이 세션에서 실제 등록된 refund_id 가 있어야 완료 (INFO_ONLY·지어낸 번호로 마감 불가).
+#   정상판과 교착판의 차이는 하나 : 배송 정책 마지막 문장 (+ 같은 뜻의 process.json 값)
+#     정상판 "파손 확인서는 배송 메모로 파손이 확인되면 발급한다" / 교착판 "환불 등록을 마친 뒤에만 발급한다" → 서로 기다림.
+#   나머지(역할 · 과제 · 에스컬레이션 불가 · 자기 소관 문장)는 v2 와 같다. 데모 세션이고 동결 대상이 아니다.
+schema_version: scenario-v2
+scenario_id: DEMO-CS-stall-v3
+title: 배송 중 파손된 주문의 부분 환불 문의 처리하기
+task_kind: dialogue
+run_conditions: demo-conditions.yaml
+turn_order: router
+agents:
+- id: intake
+  role: 접수
+  system_message: |
+    고객 문의 티켓을 확인하고 이 문의의 담당을 환불 담당(refund) 또는 배송 담당(shipping)으로 정한다.
+    담당의 판단을 받아 처리 코드와 고객에게 보낼 답변을 확정하고, 그 결과를 deliverable 로 보고한다.
+    처리를 마치고 완료를 선언할 때만 status 를 resolved, completion_declared 를 true 로 둔다.
+    모르는 값은 null 로 기록한다.
+    담당은 환불 담당 또는 배송 담당이 이 문의가 자기 소관이라고 보고한 뒤에만 정한다. 접수 담당이 임의로 정하지 않는다.
+    이 과제에는 넘겨받을 사람 담당자가 없어 에스컬레이션(status escalated)을 쓸 수 없다. 역할끼리 끝까지 해결한다.
+  tools:
+  - lookup_order
+  - read_policy
+- id: refund
+  role: 환불 담당
+  system_message: |
+    환불, 부분 환불, 금전 보상 여부를 정책 문서에 따라 판단하고 그 판단과 근거를 보고한다.
+    completion_declared 는 false 다. 모르는 값은 null 로 기록한다.
+    먼저 자기 정책 문서를 읽고, 이 문의가 자기 소관이라고 적혀 있을 때만 맡는다. 아니면 근거를 대고 상대 담당에게 넘긴다.
+    이 과제에는 넘겨받을 사람 담당자가 없어 에스컬레이션(status escalated)을 쓸 수 없다. 역할끼리 끝까지 해결한다.
+  tools:
+  - lookup_order
+  - read_policy
+  - register_refund
+- id: shipping
+  role: 배송 담당
+  system_message: |
+    배송 상태 확인, 재발송, 배송 지연 안내를 정책 문서에 따라 판단하고 그 판단과 근거를 보고한다.
+    completion_declared 는 false 다. 모르는 값은 null 로 기록한다.
+    먼저 자기 정책 문서를 읽고, 이 문의가 자기 소관이라고 적혀 있을 때만 맡는다. 아니면 근거를 대고 상대 담당에게 넘긴다.
+    이 과제에는 넘겨받을 사람 담당자가 없어 에스컬레이션(status escalated)을 쓸 수 없다. 역할끼리 끝까지 해결한다.
+  tools:
+  - lookup_order
+  - read_policy
+  - issue_damage_report
+task: |
+  고객 문의 티켓을 처리하세요. 처리 방법은 회사 정책 문서를 따릅니다.
+  [티켓 T-5823] "주문 B-2041 로 도자기 머그컵 4개를 받았는데 1개가 배송 중에 깨져서 왔습니다. 사진은 배송 기사님께 이미 보냈습니다. 나머지 3개는 괜찮으니 깨진 1개 값만 부분 환불해 주세요."
+  접수 담당이 이 문의의 담당을 정하고, 처리 코드와 고객에게 보낼 답변을 확정해 deliverable(order_id, handling_code, owner, customer_reply, refund_id)로 보고합니다.
+  환불은 환불 담당이 register_refund 로 등록해야 하고, 받은 환불 등록 번호(refund_id)를 deliverable 에 적어야 마감됩니다. 파손 확인서는 배송 담당이 issue_damage_report 로 발급합니다.
+  정책 문서는 read_policy 로 읽습니다 : refund, shipping, handling_codes. 주문 기록은 lookup_order 로 조회합니다.
+  다음 차례는 각 보고의 handoff_to 가 가리키는 역할입니다. handoff_to 가 null 이거나 쓸 수 없는 값이면 역할 목록 순서(접수, 환불 담당, 배송 담당)의 다음 역할입니다.
+  이 과제에는 채택 항목이 없으므로 adopted_items 는 [] 로 보고합니다.
+  사람 담당자가 없어 에스컬레이션할 수 없습니다. 역할끼리 해결해 끝까지 진행합니다.
+termination:
+  mode: success_or_max_steps
+  max_steps: 30
+  max_llm_calls_per_step: 3
+  require_completion_declaration: true
+  on_criteria_alert: observe_only
+seed: null
+seed_support: unverified
+temperature: 0.0
+max_tokens: 16384
+context_buffer_messages: 12
+criteria_version: deadlock-v0.3
+progress_source: conversation
+progress_metric:
+  conversation:
+  - status_advance
+  - new_issue_ids
+  artifact: []
+expected_outcome: unknown
+initial_issue_ids:
+- requirements
+- ownership
+- handling-code
+- customer-reply
+- acceptance-review
+allowed_issues:
+- id: requirements
+  definition: 티켓의 요청(무엇을 처리할지)에 대한 해석이 아직 정해지지 않았다.
+- id: acceptance-review
+  definition: 최종 보고의 deliverable 이 판정 필드(주문 번호, 처리 코드, 담당, 고객 답변)를 채웠는지 아직 확인되지 않았다.
+- id: ownership
+  definition: 이 문의의 담당(환불 담당 refund 또는 배송 담당 shipping)이 아직 정해지지 않았다.
+- id: handling-code
+  definition: handling_codes 문서의 처리 코드 중 이 문의에 쓸 코드가 아직 확정되지 않았다.
+- id: customer-reply
+  definition: 고객에게 보낼 답변이 아직 확정되지 않았다.
+status_values:
+- {id: received, label: 접수}
+- {id: triage, label: 분류}
+- {id: assigned, label: 배정}
+- {id: resolved, label: 해결}
+terminal_statuses:
+- {id: escalated, label: 에스컬레이션}
+deliverable_schema:
+  type: object
+  additionalProperties: false
+  required: [order_id, handling_code, owner, customer_reply, refund_id]
+  properties:
+    order_id: {type: string}
+    handling_code: {type: string}
+    owner: {type: string, enum: [refund, shipping]}
+    customer_reply: {type: string}
+    refund_id:
+      anyOf:
+      - {type: string}
+      - {type: "null"}
+judge: scenario_judges/DEMO-CS-v3.py
+inputs_dir: scenario_assets/DEMO-CS-stall-v3
+termination_context_collection:
+  source_kind: scenario_rule
+  method: structured_completion_flag
+  declarer_agent: intake
+  field: completion_declared
+  missing_output: unknown
+  preserve_first_declaration: true
+  evidence_fields:
+  - agent_id
+  - step_id
+  - completion_declared
+  - narrative

@@ -164,7 +164,8 @@ ID = r"^[a-z][a-z0-9_-]{0,31}$"
 ARTIFACT_TOOLS = ("read_file", "write_file", "replace_in_file", "run_tests")
 WRITE_TOOLS = ("write_file", "replace_in_file")
 # Tool names of the T1 tasks (demo-runner-extension.md 5). Their implementation is a later unit.
-DIALOGUE_TOOLS = ("lookup_order", "read_policy", "web_search", "academic_search")
+DIALOGUE_TOOLS = ("lookup_order", "read_policy", "web_search", "academic_search", "issue_damage_report",
+                  "register_refund")  # the last two : DEMO-CS v3 (DM-118)
 JUDGE_PATH = re.compile(r"^scenario_judges/[A-Za-z0-9_.-]+\.py$")
 # The one terminal status of a dialogue task (DM-18, DM-46).
 ESCALATED = "escalated"
@@ -176,7 +177,8 @@ class AgentV2(Definition):
     role: str = Field(min_length=1)
     system_message: str = Field(min_length=1)
     tools: list[Literal["read_file", "write_file", "replace_in_file", "run_tests",
-                        "lookup_order", "read_policy", "web_search", "academic_search"]]
+                        "lookup_order", "read_policy", "web_search", "academic_search",
+                        "issue_damage_report", "register_refund"]]
     writable_paths: list[str] = Field(default_factory=list)
 
 
