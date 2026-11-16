@@ -540,7 +540,7 @@ DSN/비밀번호는 로그나 예외 메시지에 출력하지 않습니다.
 프로젝트에는 `provider`와 `upstream_url`을 둘 다 둡니다. 둘은 같은 정보가
 아니라 역할이 다릅니다.
 
-- `provider`: 사용자가 이해하고 선택하는 의미 단위 (`kmu`, `groq`, `openai`, `custom` 등)
+- `provider`: 사용자가 이해하고 선택하는 의미 단위. C-19-8P 부터 `_PROVIDER_TABLE` 의 17 개 (`openai`, `anthropic`, `gemini`, `xai`, `mistral`, `deepseek`, `groq`, `together`, `fireworks`, `openrouter`, `perplexity`, `cohere`, `moonshot`, `zai`, `upstage`, `clova`, `kmu`) + 서버 플래그 뒤의 `custom`. `list_providers()` 는 id · 화면 이름 · 묶음 · 사용 가능 여부만 돌려주고 주소는 돌려주지 않습니다. `create_project(..., provider=None)` 의 `provider` 를 생략하면 서버 기본값
 - `upstream_url`: 프록시가 실제 요청을 보낼 resolved endpoint
 
 일반 provider의 URL은 서버 설정/registry에서 결정하고, `custom`일 때만 명시적 URL을
@@ -565,8 +565,9 @@ GUARDRAIL_DEFAULT_PROVIDER=kmu
 GUARDRAIL_PROVIDER_KMU_URL=https://<school-gateway>/v1
 ```
 
-`groq`/`openai`는 알려진 OpenAI-compatible base URL을 코드가 해석하고, `kmu`처럼 배포마다
-endpoint가 다른 provider는 `GUARDRAIL_PROVIDER_<NAME>_URL`을 서버에서 설정합니다.
+고정 제공자 16 곳은 내장 표의 OpenAI-compatible base URL을 쓰며 환경 변수로 덮어쓰지 않습니다 (C-19-8P).
+`kmu`처럼 배포마다 endpoint가 다른 provider만 `GUARDRAIL_PROVIDER_<NAME>_URL`을 서버에서 설정하고,
+그 값이 없으면 고를 수 없습니다. 목록 밖 이름은 환경 변수가 있어도 거절합니다.
 이 URL에는 API key/token/password 같은 credential query parameter를 넣을 수 없습니다. Provider key는
 요청 시 비밀 채널/서버 설정으로 전달하고 PostgreSQL에는 저장하지 않습니다.
 

@@ -58,11 +58,42 @@ PROVIDER_URL_ENV_PREFIX = "GUARDRAIL_PROVIDER_"
 CUSTOM_PROVIDER_ENABLED_ENV = "GUARDRAIL_ALLOW_CUSTOM_PROVIDER"
 _PROVIDER_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 
-# Public providers have stable OpenAI-compatible base URLs.  KMU intentionally
-# has no hard-coded address because the school endpoint is deployment-specific.
+# C-19-8P : the providers a project may forward to (OpenAI-compatible Chat
+# Completions base URLs, fixed addresses checked by the PM in the providers'
+# official documentation on 2026-11-17).  Customers pick one of these ids; they
+# never type an address (custom endpoints stay behind the server flag below).
+# Rows are (id, display name, group, base URL).  Groups : "global" (해외),
+# "korea" (국내), "team" (팀 데모).  KMU intentionally has no hard-coded address
+# because the school endpoint is deployment-specific (GUARDRAIL_PROVIDER_KMU_URL).
+# The gateway appends /chat/completions, so no address ends with "/".
+_PROVIDER_TABLE = (
+    ("openai", "OpenAI (GPT)", "global", "https://api.openai.com/v1"),
+    ("anthropic", "Anthropic (Claude)", "global", "https://api.anthropic.com/v1"),
+    ("gemini", "Google (Gemini)", "global",
+     "https://generativelanguage.googleapis.com/v1beta/openai"),
+    ("xai", "xAI (Grok)", "global", "https://api.x.ai/v1"),
+    ("mistral", "Mistral", "global", "https://api.mistral.ai/v1"),
+    ("deepseek", "DeepSeek", "global", "https://api.deepseek.com"),
+    ("groq", "Groq", "global", "https://api.groq.com/openai/v1"),
+    ("together", "Together AI", "global", "https://api.together.xyz/v1"),
+    ("fireworks", "Fireworks AI", "global", "https://api.fireworks.ai/inference/v1"),
+    ("openrouter", "OpenRouter", "global", "https://openrouter.ai/api/v1"),
+    ("perplexity", "Perplexity", "global", "https://api.perplexity.ai"),
+    ("cohere", "Cohere", "global", "https://api.cohere.ai/compatibility/v1"),
+    ("moonshot", "Moonshot (Kimi)", "global", "https://api.moonshot.ai/v1"),
+    ("zai", "Z.ai (GLM)", "global", "https://api.z.ai/api/paas/v4"),
+    ("upstage", "Upstage (Solar)", "korea", "https://api.upstage.ai/v1"),
+    ("clova", "네이버 (HyperCLOVA X)", "korea",
+     "https://clovastudio.stream.ntruss.com/v1/openai"),
+    ("kmu", "학교 게이트웨이 (팀 데모)", "team", None),
+)
+SERVER_CONFIGURED_PROVIDERS = frozenset(
+    pid for pid, _, _, url in _PROVIDER_TABLE if url is None
+)
+# Every id a customer may pick (availability aside) : the list, never 'custom'.
+SELECTABLE_PROVIDER_IDS = frozenset(pid for pid, _, _, _ in _PROVIDER_TABLE)
 _BUILTIN_PROVIDER_URLS = {
-    "groq": "https://api.groq.com/openai/v1",
-    "openai": "https://api.openai.com/v1",
+    pid: url.rstrip("/") for pid, _, _, url in _PROVIDER_TABLE if url is not None
 }
 
 _CREDENTIAL_QUERY_KEYS = {
@@ -203,23 +234,66 @@ def _resolve_provider_upstream(provider: str, upstream_url: str | None = None) -
             raise ValueError("upstream_url may be supplied only for provider='custom'")
         return provider, _validate_public_custom_target(upstream_url, "custom upstream URL")
 
-    configured = os.getenv(_provider_url_env_name(provider), "").strip()
-    if configured:
-        if provider == "custom":
+    if provider == "custom":
+        configured = os.getenv(_provider_url_env_name(provider), "").strip()
+        if configured:
             return provider, _validate_public_custom_target(
                 configured, "custom upstream URL"
             )
-        return provider, _validate_upstream_url(configured, f"{provider} upstream URL")
+        raise RuntimeError("custom provider requires an explicit upstream_url")
 
+    # C-19-8P : a fixed provider always uses its fixed address (no server
+    # override), so the address a project stores is always one of the list.
     builtin = _BUILTIN_PROVIDER_URLS.get(provider)
     if builtin:
         return provider, builtin
 
-    if provider == "custom":
-        raise RuntimeError("custom provider requires an explicit upstream_url")
+    if provider in SERVER_CONFIGURED_PROVIDERS:
+        env_name = _provider_url_env_name(provider)
+        configured = os.getenv(env_name, "").strip()
+        if configured:
+            return provider, _validate_upstream_url(configured, f"{provider} upstream URL")
+        raise RuntimeError(f"{env_name} must be configured for provider '{provider}'")
 
-    env_name = _provider_url_env_name(provider)
-    raise RuntimeError(f"{env_name} must be configured for provider '{provider}'")
+    # Outside the list : rejected whatever the server environment says.
+    raise ValueError(f"unknown provider '{provider}'")
+
+
+def provider_available(provider: str) -> bool:
+    """Whether a customer may pick this provider id now (C-19-8P).
+
+    Fixed providers always ; server-configured ones (kmu) only when the server
+    has their address.  'custom' and ids outside the list are never offered.
+    """
+    if provider in _BUILTIN_PROVIDER_URLS:
+        return True
+    if provider in SERVER_CONFIGURED_PROVIDERS:
+        return bool(os.getenv(_provider_url_env_name(provider), "").strip())
+    return False
+
+
+def list_providers() -> list[dict]:
+    """The provider choices for the screen : id, display name, group, available.
+
+    Addresses and server settings are deliberately left out (C-19-8P) : the
+    screen needs a name to show and an id to send back, nothing else.
+    """
+    return [
+        {"id": pid, "name": name, "group": group, "available": provider_available(pid)}
+        for pid, name, group, _ in _PROVIDER_TABLE
+    ]
+
+
+def _resolve_selectable_provider(provider) -> tuple[str, str]:
+    """Resolve a provider a caller picked from the list (never 'custom')."""
+    if not isinstance(provider, str) or not provider.strip():
+        raise ValueError("provider is required")
+    provider = _normalize_provider(provider)
+    if provider not in SELECTABLE_PROVIDER_IDS:
+        raise ValueError(f"unknown provider '{provider}'")
+    if not provider_available(provider):
+        raise ValueError(f"provider '{provider}' is not available on this server")
+    return _resolve_provider_upstream(provider)
 
 
 def _get_default_provider_config() -> tuple[str, str]:
@@ -1047,8 +1121,14 @@ def list_allowed_emails():
 
 
 
-def create_project(owner_user_id, name, mode):
-    """Create a user-owned Guardrail project."""
+def create_project(owner_user_id, name, mode, provider=None):
+    """Create a user-owned Guardrail project.
+
+    provider (C-19-8P) : an id from list_providers().  None keeps the old
+    behaviour (the server default provider); an empty value, an id outside the
+    list, 'custom' or a provider this server cannot use (kmu without its
+    address) is a ValueError.
+    """
     if isinstance(owner_user_id, bool) or not isinstance(owner_user_id, int) or owner_user_id < 1:
         raise ValueError("owner_user_id must be a positive integer")
 
@@ -1057,7 +1137,10 @@ def create_project(owner_user_id, name, mode):
     if not clean_name:
         raise ValueError("project name is required")
     assert_no_secrets(clean_name, "project name")
-    provider, upstream_url = _get_default_provider_config()
+    if provider is None:
+        provider, upstream_url = _get_default_provider_config()
+    else:
+        provider, upstream_url = _resolve_selectable_provider(provider)
 
     with get_connection() as conn:
         with conn.cursor() as cursor:
@@ -1167,9 +1250,15 @@ def set_project_provider(project_id, user_id, provider, upstream_url=None):
 
     provider is the user-facing choice. upstream_url is resolved automatically
     for named providers and stored as the concrete proxy routing endpoint.
-    Only provider='custom' accepts an explicit upstream_url.
+    Only provider='custom' accepts an explicit upstream_url (and only behind
+    the server flag).  Any other provider must be an available id from
+    list_providers() (C-19-8P), the same rule as create_project().
     """
-    provider, resolved_url = _resolve_provider_upstream(provider, upstream_url)
+    is_custom = isinstance(provider, str) and provider.strip().lower() == "custom"
+    if upstream_url is not None or is_custom:
+        provider, resolved_url = _resolve_provider_upstream(provider, upstream_url)
+    else:
+        provider, resolved_url = _resolve_selectable_provider(provider)
 
     with get_connection() as conn:
         with conn.cursor() as cursor:
