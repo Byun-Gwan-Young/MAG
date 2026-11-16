@@ -1,4 +1,5 @@
-"""C-19-8K : guardrail API keys (issue · list · revoke) and the project mode (observe · block).
+"""C-19-8K : guardrail API keys (issue · list · revoke) and the project mode (observe · block) ;
+C-19-8P : the project's LLM provider through the same PATCH.
 
 Everything goes through storage/accounts.py (no SQL here). The raw key leaves the server once, in the issue response
 (never stored, logged, or put in an error). Someone else's project or key is 404 ; the shared read-only demo project
@@ -89,7 +90,16 @@ def revoke_key(payload: CsrfRequest, key_id: int = Path(..., ge=1, le=MAX_ID), u
 @router.patch("/api/projects/{project_id}", response_model=ProjectResponse)
 def set_mode(payload: ProjectModeRequest, project_id: int = Path(..., ge=1, le=MAX_ID),
              user=Depends(get_current_user)):
+    """The project mode (C-19-8K) and/or its LLM provider (C-19-8P, an id from GET /api/providers)."""
     _check_csrf(user, payload.csrf_token)
     _writable_project(user, project_id)
-    _call(accounts.set_project_mode, project_id, user["id"], payload.mode)
+    if payload.provider is not None and not accounts.provider_available(payload.provider):
+        raise HTTPException(422, "Provider not available")
+    if payload.mode is not None:
+        _call(accounts.set_project_mode, project_id, user["id"], payload.mode)
+    if payload.provider is not None:
+        try:
+            _call(accounts.set_project_provider, project_id, user["id"], payload.provider)
+        except ValueError as exc:   # availability changed in between : same answer, no message echoed
+            raise HTTPException(422, "Provider not available") from exc
     return _writable_project(user, project_id)

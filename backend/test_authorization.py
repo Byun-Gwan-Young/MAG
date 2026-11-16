@@ -21,7 +21,7 @@ class AuthorizationTests(fixture.BackendTests):
         # backend-foundation merge (DM-107) ; here projects 1 and 2 move to owner 7.
         self.db.executescript("""
             UPDATE projects SET owner_user_id = 7;
-            INSERT INTO projects VALUES
+            INSERT INTO projects (id, name, mode, rule_id, created_at, owner_user_id) VALUES
               (3, 'Other owner', 'observe', 'deadlock-v0.3', '2026-10-12', 8),
               (4, 'Ownerless', 'observe', 'deadlock-v0.3', '2026-10-12', NULL);
             INSERT INTO scenarios VALUES (30, 3), (40, 4);

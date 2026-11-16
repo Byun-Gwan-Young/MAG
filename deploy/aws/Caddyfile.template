@@ -26,9 +26,9 @@
 		uri /api/auth/check
 	}
 
-	# --- service backend (DM-108, 127.0.0.1:8030) : sign-in API, the user's projects, their keys (C-19-8K) ---
-	# Before @api : /api/auth/*, /api/projects* and /api/keys/* would otherwise fall into /api/*.
-	@backend path /api/auth/* /api/projects /api/projects/* /api/keys/*
+	# --- service backend (DM-108, 127.0.0.1:8030) : sign-in API, the user's projects, their keys (C-19-8K), the provider list (C-19-8P) ---
+	# Before @api : /api/auth/*, /api/projects*, /api/keys/* and /api/providers would otherwise fall into /api/*.
+	@backend path /api/auth/* /api/projects /api/projects/* /api/keys/* /api/providers
 	handle @backend {
 		reverse_proxy 127.0.0.1:8030
 	}

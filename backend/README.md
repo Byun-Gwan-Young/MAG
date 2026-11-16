@@ -81,7 +81,8 @@ deletion_requested_at, deletion_due_at, can_restore, csrf_token을 반환합니�
 | POST /api/projects | 본인 소유 프로젝트 생성. 아래 생성 예시 참고 |
 | GET /api/projects/{project_id}/sessions?limit=20&offset=0 | 세션 목록·페이지네이션 |
 | GET /api/projects/{project_id}/sessions/{session_id} | 선택한 세션의 상세 |
-| PATCH /api/projects/{project_id} | 모드 바꾸기 `{mode: observe·block, csrf_token}` (C-19-8K) |
+| PATCH /api/projects/{project_id} | 모드 · 제공자 바꾸기 `{mode?: observe·block, provider?: 제공자 id, csrf_token}`, 둘 중 하나 이상 (C-19-8K · C-19-8P) |
+| GET /api/providers | 고를 수 있는 LLM 제공자 `[{id, name, group: global·korea·team, available}]`. 주소 · 서버 설정값은 넣지 않음 (C-19-8P) |
 | GET · POST /api/projects/{project_id}/keys | 키 목록 · 발급 `{name, csrf_token}`. 발급 응답의 `api_key` 원문은 이때 한 번만 (C-19-8K) |
 | POST /api/keys/{key_id}/revoke | 키 폐기 `{csrf_token}` (C-19-8K) |
 | GET /api/auth/me | 로그인 사용자와 계정 상태 조회 |
@@ -115,8 +116,9 @@ const project = await response.json();
 // project.id를 선택 상태에 저장하고 GET /api/projects로 목록 갱신
 ```
 
-성공 시 201과 `id`, `name`, `mode`, `rule_id`, `created_at`을 반환합니다.
-소유자는 서버가 세션에서 정합니다. `owner_user_id`, `rule_id`, `provider`, `upstream_url`, `read_only` 같은 추가 필드는 422로 거절합니다.
+성공 시 201과 `id`, `name`, `mode`, `rule_id`, `provider`, `created_at`을 반환합니다 (주소 `upstream_url` 은 반환하지 않음).
+`provider` (C-19-8P) 는 `GET /api/providers` 의 id 하나입니다. 생략하면 서버 기본 provider, 목록 밖 · `custom` · 지금 쓸 수 없는 제공자 (`kmu` 주소 미설정) 는 422.
+소유자는 서버가 세션에서 정합니다. `owner_user_id`, `rule_id`, `upstream_url`, `read_only` 같은 추가 필드는 422로 거절합니다.
 API 키는 이 요청으로 발급하지 않습니다. 생성 시점에는 실행 세션이 없어 목록이 비어 있는 것이 정상입니다.
 
 생성 기본 provider는 백엔드 설정이 필요합니다. 예를 들어 백엔드 실행 전 같은 터미널에서 다음을 설정합니다.
@@ -128,7 +130,7 @@ $env:GUARDRAIL_DEFAULT_RULE_ID = "deadlock-v0.3"
 ```
 
 KMU를 사용하는 환경이면 기본 provider를 `kmu`로 정하고 `GUARDRAIL_PROVIDER_KMU_URL`도 실제 학교 게이트웨이 주소로 설정합니다.
-Groq/OpenAI의 기본 URL은 Storage가 결정합니다. provider나 규칙 변경은 서버 재시작 후 적용합니다.
+고정 제공자 16 곳 (OpenAI · Anthropic · Gemini · … · 네이버) 의 URL은 Storage 내장 표가 결정하며 환경 변수로 바꿀 수 없습니다 (C-19-8P). provider나 규칙 변경은 서버 재시작 후 적용합니다.
 서버 provider 설정 누락·오류 또는 DB 실패는 503입니다. 세부 접속 정보는 응답에 노출하지 않습니다.
 비로그인은 401, 복구 전용 계정이나 CSRF 불일치는 403, 이름·모드·필드 형식 오류는 422입니다.
 프로젝트 이름에 비밀 키로 보이는 문자열도 넣지 않습니다.

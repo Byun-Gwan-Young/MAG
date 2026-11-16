@@ -9,10 +9,17 @@ from storage.safety import assert_no_secrets
 from backend.db import get_db
 from backend.auth.dependencies import get_current_user
 from backend.repositories.projects import fetch_projects
-from backend.schemas import ProjectCreateRequest, ProjectResponse
+from backend.schemas import ProjectCreateRequest, ProjectResponse, ProviderResponse
 
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
+providers_router = APIRouter(tags=["projects"])
+
+
+@providers_router.get("/api/providers", response_model=list[ProviderResponse])
+def list_providers(user=Depends(get_current_user)):
+    """C-19-8P : the LLM providers a project may forward to. Ids, names and availability only (no address)."""
+    return accounts.list_providers()
 
 
 @router.get("", response_model=list[ProjectResponse])
@@ -28,10 +35,15 @@ def create_project(payload: ProjectCreateRequest, user=Depends(get_current_user)
         assert_no_secrets(payload.name, "project name")
     except ValueError as exc:
         raise HTTPException(422, "Invalid project name") from exc
+    if payload.provider is not None and not accounts.provider_available(payload.provider):
+        # In the list but not usable here (kmu without its server address).
+        raise HTTPException(422, "Provider not available")
+    # C-19-8P : no provider sent = the server default, through the exact old call.
+    extra = () if payload.provider is None else (payload.provider,)
     try:
         # Storage locks and rechecks the account in the insert transaction,
         # serializing project creation against withdrawal and final deletion.
-        return accounts.create_project(user["id"], payload.name, payload.mode)
+        return accounts.create_project(user["id"], payload.name, payload.mode, *extra)
     except LookupError as exc:
         raise HTTPException(401, "Login required") from exc
     except ValueError as exc:
