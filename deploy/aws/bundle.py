@@ -5,11 +5,15 @@
 1. `git archive <ref>` of the INCLUDE paths minus the EXCLUDE paths (both lists below) : the query API (service/), the
    storage layer (storage/), the few modules they import, and the small committed demo records the loader and the API
    read. The proxy, the runner, the batch runner, keys, raw session logs, docs/handoff and venv never go.
-2. The demo screen is built on the Mac with `tools/demo_ui.py build --api` from a full `git archive <ref>` in a temporary
-   folder (the build reads the proxy code and configuration for the system page ; those files stay on the Mac) and goes
-   into the bundle as site/index.html.
+2. The screen (C-19-10, DM-111 · DM-114) : the React build `frontend/dist` (made on the PM's computer with `npm ci` and
+   `npm run build` ; no Node on the server) goes in as site/ — missing dist stops with "npm run build first", and a dist
+   older than the frontend sources, or frontend sources that differ from <ref>, is a problem. From a full
+   `git archive <ref>` in a temporary folder (both builds read the proxy code and configuration for the system page ;
+   those files stay on the Mac) : the frozen reference data the React screen reads at /api/frontend/reference
+   (`frontend/export_reference.py`) as site/reference.json, and the old Python demo screen (`tools/demo_ui.py build
+   --api`, kept for the presentation) as site/legacy/index.html.
 3. Checks on every bundled file (a failure stops with no bundle) : no path matches EXCLUDE, no file over
-   MAX_FILE_BYTES, no key pattern (D-11 patterns and the key values set in this shell, service.store.key_hits), no model
+   MAX_FILE_BYTES, no key pattern (also in the built JS · CSS) (D-11 patterns and the key values set in this shell, service.store.key_hits), no model
    text field (narrative, reasoning text, message content) in any JSON file.
 4. Writes DIR/bundle.tar.gz, DIR/bundle-files.txt (path and bytes per line) and DIR/remote-install.sh (the committed
    copy), and prints a JSON summary. Offline : git and the local Python only.
@@ -31,7 +35,13 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from service.store import forbidden_fields, key_hits  # noqa: E402
 
-BUNDLE_VERSION = 'guardrail-server-bundle-v1'
+BUNDLE_VERSION = 'guardrail-server-bundle-v2'   # v2 (C-19-10) : site/ is the React build
+DIST = ROOT / 'frontend' / 'dist'
+# What `npm run build` reads (the rest of frontend/ is local tooling and tests).
+FRONTEND_SOURCES = ('frontend/src', 'frontend/public', 'frontend/index.html', 'frontend/package.json',
+                    'frontend/package-lock.json', 'frontend/vite.config.js')
+# Files the bundle itself puts under site/ ; the React build must not bring its own.
+SITE_RESERVED = ('site/reference.json', 'site/legacy/')
 # What the server needs : the API and loader code, the modules they import (service.store -> tools.analyze_session ->
 # experiments protocol constants, scenario_schema, json_subset, progress_schema, tools.gateway_prices), the deploy files,
 # and the committed demo records the loader (storage demo-all, service.load_demo check) and the API read.
@@ -79,7 +89,7 @@ EXCLUDE = (
 )
 MAX_FILE_BYTES = 1024 * 1024
 TEXT_SUFFIXES = {'.py', '.json', '.yaml', '.yml', '.md', '.txt', '.sql', '.sh', '.service', '.template', '.example',
-                 '.html', '.toml', '.cfg', ''}
+                 '.html', '.toml', '.cfg', '.js', '.css', '.svg', ''}
 
 
 def git(*args, **kwargs):
@@ -106,13 +116,19 @@ def archive_members(ref, specs=None):
     return out
 
 
-def build_screen(ref, workdir):
-    """site/index.html : the demo screen in query API mode, built from a full archive of `ref` in a temporary folder."""
+def build_from_archive(ref, workdir):
+    """From a full archive of `ref` in a temporary folder : (reference JSON bytes, legacy screen bytes, screen info)."""
     full = Path(workdir) / 'full'
     full.mkdir()
     data = git('archive', '--format=tar', ref).stdout
     with tarfile.open(fileobj=io.BytesIO(data)) as tar:
         tar.extractall(full, filter='data')
+    # The same export the local adapter serves (frontend/dev_server.py) ; it writes frontend/public/records.json.
+    result = subprocess.run([sys.executable, '-B', str(full / 'frontend' / 'export_reference.py')],
+                            capture_output=True, text=True, cwd=full)
+    if result.returncode != 0:
+        raise SystemExit(f'frontend reference export failed: {result.stdout[-500:]} {result.stderr[-500:]}')
+    reference = (full / 'frontend' / 'public' / 'records.json').read_bytes()
     output = Path(workdir) / 'index.html'
     result = subprocess.run([sys.executable, '-B', str(full / 'tools' / 'demo_ui.py'), 'build', '--api',
                              '--aggregate', str(full / 'reports' / 'c19' / 'aggregate-main.json'),
@@ -120,7 +136,35 @@ def build_screen(ref, workdir):
                             capture_output=True, text=True, cwd=full)
     if result.returncode != 0:
         raise SystemExit(f'demo screen build failed: {result.stdout[-500:]} {result.stderr[-500:]}')
-    return output.read_bytes(), json.loads(result.stdout)
+    return reference, output.read_bytes(), json.loads(result.stdout)
+
+
+def source_problems(commit, built_at):
+    """Why frontend/dist may not be the build of `commit` : sources that differ from it, or a newer source file."""
+    problems = []
+    diff = subprocess.run(['git', '-C', str(ROOT), 'diff', '--name-only', commit, '--', *FRONTEND_SOURCES],
+                          capture_output=True, text=True, check=True).stdout.split()
+    untracked = git('ls-files', '--others', '--exclude-standard', '--', *FRONTEND_SOURCES, text=True).stdout.split()
+    for path in sorted(set(diff + untracked)):
+        problems.append(f'frontend source differs from {commit[:12]}: {path}')
+    tracked = git('ls-files', '--', *FRONTEND_SOURCES, text=True).stdout.split()
+    newer = [p for p in tracked if (ROOT / p).is_file() and (ROOT / p).stat().st_mtime > built_at]
+    if newer:
+        problems.append(f'frontend/dist is older than {newer[0]} (and {len(newer) - 1} more) : npm run build again')
+    return problems
+
+
+def frontend_build(commit, dist=DIST, check_sources=True):
+    """({site/... : bytes} of the React build, problems). No build at all stops : the PM runs npm run build first."""
+    dist = Path(dist)
+    index = dist / 'index.html'
+    if not index.is_file():
+        raise SystemExit(f'{dist} has no React build (index.html) : run `npm ci` and `npm run build` in frontend first')
+    files = {f'site/{p.relative_to(dist).as_posix()}': p.read_bytes() for p in sorted(dist.rglob('*')) if p.is_file()}
+    problems = [f'React build brings a reserved path: {p}' for p in files if p.startswith(SITE_RESERVED)]
+    if check_sources:
+        problems += source_problems(commit, index.stat().st_mtime)
+    return files, problems
 
 
 def check(files):
@@ -145,19 +189,30 @@ def check(files):
     return problems
 
 
-def build(ref='main', out=None):
+def build(ref='main', out=None, dist=DIST, check_sources=True):
     commit = git('rev-parse', '--verify', f'{ref}^{{commit}}', text=True).stdout.strip()
+    site, site_problems = frontend_build(commit, dist, check_sources)
     files = archive_members(commit, pathspecs())
     with tempfile.TemporaryDirectory() as workdir:
-        screen, screen_info = build_screen(commit, workdir)
-    files['site/index.html'] = screen
+        reference, legacy, screen_info = build_from_archive(commit, workdir)
+    files.update(site)
+    files['site/reference.json'] = reference
+    files['site/legacy/index.html'] = legacy
+    site_hash = hashlib.sha256()
+    for path, body in sorted(site.items()):
+        site_hash.update(f'{path}\t{len(body)}\n'.encode('utf-8'))
+        site_hash.update(body)
     info = {'bundle_version': BUNDLE_VERSION, 'ref': ref, 'commit': commit,
             'built_at': datetime.now(timezone.utc).isoformat(timespec='seconds'),
+            'frontend': {'files': len(site), 'bytes': sum(len(b) for b in site.values()),
+                         'sha256': site_hash.hexdigest(),
+                         'reference_sessions': len(json.loads(reference)['sessions'])},
             'screen': {'sessions': screen_info['sessions'], 'api': screen_info['api'],
-                       'replay_missing': screen_info['replay_missing']},
+                       'replay_missing': screen_info['replay_missing'], 'path': '/legacy/'},
             'files': len(files) + 1, 'bytes': sum(len(b) for b in files.values())}
     files['DEPLOY_INFO.json'] = (json.dumps(info, ensure_ascii=False, indent=1) + '\n').encode('utf-8')
-    problems = check(files) + (['screen sessions missing replay.json'] if screen_info['replay_missing'] else [])
+    problems = (site_problems + check(files)
+                + (['screen sessions missing replay.json'] if screen_info['replay_missing'] else []))
     summary = {**info, 'bytes': sum(len(b) for b in files.values()), 'problems': problems}
     if problems or out is None:
         return summary, files
@@ -184,8 +239,9 @@ def main(argv=None):
     one = sub.add_parser('build')
     one.add_argument('--ref', default='main')
     one.add_argument('--out', type=Path, required=True)
+    one.add_argument('--dist', type=Path, default=DIST, help='the React build (default frontend/dist)')
     args = parser.parse_args(argv)
-    summary, _ = build(args.ref, args.out)
+    summary, _ = build(args.ref, args.out, args.dist)
     print(json.dumps(summary, ensure_ascii=False, indent=1))
     return 1 if summary['problems'] else 0
 

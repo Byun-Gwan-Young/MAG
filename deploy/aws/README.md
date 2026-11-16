@@ -29,7 +29,7 @@ Caddy  (서버, 80 · 443 만 열림, 인증서 자동)
 | [`remote.sh`](remote.sh) | 맥 | `target.env` 값으로 서버에 접속 (`ssh`), 서버 준비 (`setup`), 상태 (`status`), DNS 반영 확인 (`dns`), 브라우저로 열기 (`open`) |
 | [`server-setup.sh`](server-setup.sh) | 서버 (sudo, 한 번) | PostgreSQL · Caddy (공식 apt 저장소) · uv · Python 3.14, 사용자 `guardrail`, 폴더, DB 역할 · DB, 서비스 가상환경. 다시 돌려도 안전 |
 | [`deploy.sh`](deploy.sh) | 맥 | 묶음 만들기 → 보내기 → 서버 설치 (`remote-install.sh`) → 확인 결과 가져오기 → `https://도메인/api/summary` 확인 |
-| [`bundle.py`](bundle.py) | 맥 | 서버로 가는 묶음 : `git archive main` 의 포함 목록 − 제외 목록, 화면 빌드, 검사 |
+| [`bundle.py`](bundle.py) | 맥 | 서버로 가는 묶음 : `git archive main` 의 포함 목록 − 제외 목록, React 빌드 (`frontend/dist`) · 참고 데이터 · 옛 화면, 검사 (빌드 JS · CSS 의 키 패턴 포함) |
 | [`remote-install.sh`](remote-install.sh) | 서버 (deploy 가 실행) | 릴리스 폴더 → 가상환경 → `storage init` · `storage demo-all` · `service.load_demo check` (하나라도 다르면 멈춤, 이전 릴리스 유지) → API 재시작 → Caddy |
 | [`Caddyfile.template`](Caddyfile.template) | 서버 `/etc/caddy/Caddyfile` | HTTPS, 백엔드 (구글 로그인) · API 로 가는 경로 목록, 보안 헤더. 도메인 · 해시는 환경 파일에서 |
 | [`guardrail-api.service`](guardrail-api.service) | 서버 systemd | 조회 API (`guardrail` 사용자, `127.0.0.1:8020`, `Restart=always`) |
@@ -39,9 +39,9 @@ Caddy  (서버, 80 · 443 만 열림, 인증서 자동)
 
 ## 서버로 가는 것 · 가지 않는 것
 
-- **간다** (main 의 커밋된 파일만, `bundle.py` 의 `INCLUDE`) : `service/`, `storage/`, `deploy/aws/`, 그 둘이 가져다 쓰는 모듈 (`tools/analyze_session.py` · `tools/gateway_prices.py` · `experiments/` 의 계약 · 프로토콜 상수 3 파일 · `scenario_schema.py` · `json_subset.py` · `progress_schema.py`), 적재 · API 가 읽는 작은 기록 (`reports/c19/aggregate-main.json`, `reports/c18-8/` 제외 목록 · 계정 보정, 세션별 `summary.json` · `scenario.yaml` · `conditions.json` · `record/*.json`, `scenarios/README.md`, `batch_plans/`, 동결 기록), 맥에서 빌드한 화면 `site/index.html`
+- **간다** (main 의 커밋된 파일만, `bundle.py` 의 `INCLUDE`) : `service/`, `storage/`, `deploy/aws/`, 그 둘이 가져다 쓰는 모듈 (`tools/analyze_session.py` · `tools/gateway_prices.py` · `experiments/` 의 계약 · 프로토콜 상수 3 파일 · `scenario_schema.py` · `json_subset.py` · `progress_schema.py`), 적재 · API 가 읽는 작은 기록 (`reports/c19/aggregate-main.json`, `reports/c18-8/` 제외 목록 · 계정 보정, 세션별 `summary.json` · `scenario.yaml` · `conditions.json` · `record/*.json`, `scenarios/README.md`, `batch_plans/`, 동결 기록), **React 빌드 결과 `frontend/dist` → `site/`** (C-19-10 : PM 컴퓨터에서 `npm ci` · `npm run build` 먼저. 서버에는 Node 를 깔지 않는다. dist 가 없으면 묶음을 만들지 않고, main 의 프론트 소스와 다르거나 소스보다 오래된 dist 는 문제로 잡는다), React 가 읽는 동결 참고 데이터 `site/reference.json` (`frontend/export_reference.py`), 발표 대비 옛 화면 `site/legacy/index.html` (`tools/demo_ui.py build --api`)
 - **가지 않는다** (`bundle.py` 의 `EXCLUDE`, 묶음 목록에서 한 번 더 검사) : 프록시 · 실행기 · 배치 실행기, KMU · Tavily 키 (`.env*`, `*.pem` 등), 세션 원본 (`logs/`, `session.json`, `steps.json` 등), `docs/handoff`, venv
-- 묶음의 모든 파일을 키 패턴 · 모델 발언 필드 (narrative · reasoning 본문 · 메시지 내용) · 1 MiB 넘는 파일로 검사하고, 하나라도 걸리면 묶음을 만들지 않습니다
+- 묶음의 모든 파일 (빌드된 JS · CSS 포함) 을 키 패턴 · 모델 발언 필드 (narrative · reasoning 본문 · 메시지 내용) · 1 MiB 넘는 파일로 검사하고, 하나라도 걸리면 묶음을 만들지 않습니다
 
 ## 다시 배포하기
 

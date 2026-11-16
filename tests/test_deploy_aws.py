@@ -347,12 +347,28 @@ class ServerPackages(unittest.TestCase):
         self.assertIn('psycopg[binary]==', '\n'.join(lines))
 
 
+FAKE_INDEX = b'<!doctype html><div id="root"></div><script type="module" src="/assets/app.js"></script>'
+
+
+def fake_dist(folder, extra=None):
+    """A stand-in React build (the offline suite does not run npm) ; the real one is checked by bundle.py itself."""
+    dist = Path(folder)
+    (dist / 'assets').mkdir(parents=True)
+    (dist / 'index.html').write_bytes(FAKE_INDEX)
+    (dist / 'assets' / 'app.js').write_bytes(b'console.log("guardrail");\n')
+    for path, body in (extra or {}).items():
+        (dist / path).parent.mkdir(parents=True, exist_ok=True)
+        (dist / path).write_bytes(body)
+    return dist
+
+
 class Bundle(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tmp = tempfile.TemporaryDirectory()
         cls.addClassCleanup(cls.tmp.cleanup)
-        cls.summary, cls.files = bundle.build('HEAD', Path(cls.tmp.name) / 'out')
+        dist = fake_dist(Path(cls.tmp.name) / 'dist')
+        cls.summary, cls.files = bundle.build('HEAD', Path(cls.tmp.name) / 'out', dist=dist, check_sources=False)
 
     def test_exclusion_list_names_what_must_not_go(self):
         for pattern in ('logs/*', 'docs/handoff/*', '.env', '.env.*', '*.pem', 'venv/*', 'deploy/aws/target.env',
@@ -364,7 +380,10 @@ class Bundle(unittest.TestCase):
         self.assertEqual(self.summary['problems'], [])
         head = subprocess.run(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip()
         self.assertEqual(self.summary['commit'], head)
-        self.assertEqual(self.summary['screen'], {'sessions': 67, 'api': True, 'replay_missing': []})
+        self.assertEqual(self.summary['screen'], {'sessions': 67, 'api': True, 'replay_missing': [],
+                                                  'path': '/legacy/'})
+        self.assertEqual(self.summary['bundle_version'], 'guardrail-server-bundle-v2')
+        self.assertEqual((self.summary['frontend']['files'], self.summary['frontend']['reference_sessions']), (2, 67))
         paths = set(self.files)
         for path in paths:
             self.assertFalse(bundle.excluded(path), path)
@@ -380,7 +399,14 @@ class Bundle(unittest.TestCase):
                         'backend/main.py', 'backend/templates/login.html', 'deploy/aws/guardrail-backend.service'):
             self.assertIn(present, paths)
         self.assertEqual(len([p for p in paths if p.endswith('/record/replay.json')]), 115)
-        self.assertIn(b'apiLoad', self.files['site/index.html'])
+        # C-19-10 : site/ is the React build ; the frozen reference beside it ; the old screen under /legacy/.
+        self.assertEqual(self.files['site/index.html'], FAKE_INDEX)
+        self.assertIn('site/assets/app.js', paths)
+        self.assertEqual(len(json.loads(self.files['site/reference.json'])['sessions']), 67)
+        self.assertEqual(json.loads(self.files['site/reference.json']),
+                         json.loads((ROOT / 'frontend' / 'public' / 'records.json').read_text(encoding='utf-8')))
+        self.assertIn(b'apiLoad', self.files['site/legacy/index.html'])
+        self.assertNotIn('frontend/src/App.jsx', paths)      # sources stay on the PM's computer
         listing = (Path(self.tmp.name) / 'out' / 'bundle-files.txt').read_text(encoding='utf-8').splitlines()
         self.assertEqual(len(listing), len(paths))
 
@@ -390,6 +416,10 @@ class Bundle(unittest.TestCase):
         self.assertTrue(bundle.check({'service/x.py': b"KEY = 'gsk_" + b'a' * 40 + b"'"}))
         self.assertTrue(bundle.check({'reports/big.json': b'0' * (bundle.MAX_FILE_BYTES + 1)}))
         self.assertEqual(bundle.check({'service/x.py': b'print(1)\n'}), [])
+        # C-19-10 : the built JS and CSS are scanned for keys too.
+        self.assertTrue(bundle.check({'site/assets/x.js': b"const k='gsk_" + b'a' * 40 + b"'"}))
+        self.assertTrue(bundle.check({'site/assets/x.css': b"/* gsk_" + b'a' * 40 + b" */"}))
+
 
     def test_bundle_alone_runs_the_loader_check_and_builds_every_payload(self):
         # The server runs from the bundle only : the offline loader check (same SQL on SQLite) and the storage payloads.
@@ -409,6 +439,49 @@ class Bundle(unittest.TestCase):
                                       text=True, env=env, timeout=300)
             self.assertEqual(payloads.returncode, 0, payloads.stderr[-800:])
             self.assertEqual(payloads.stdout.strip(), '115')
+
+
+class ReactBuild(unittest.TestCase):
+    """C-19-10 part 1 : frontend/dist goes into the bundle ; no build stops, a stale or foreign build is a problem."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.head = subprocess.run(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], capture_output=True,
+                                   text=True).stdout.strip()
+
+    def test_missing_build_stops_with_npm_run_build(self):
+        with self.assertRaises(SystemExit) as stop:
+            bundle.frontend_build(self.head, Path(self.tmp.name) / 'nothing', check_sources=False)
+        self.assertIn('npm run build', str(stop.exception))
+        with self.assertRaises(SystemExit):
+            bundle.build('HEAD', Path(self.tmp.name) / 'out', dist=Path(self.tmp.name) / 'nothing')
+        self.assertFalse((Path(self.tmp.name) / 'out').exists())
+
+    def test_build_files_go_under_site(self):
+        files, problems = bundle.frontend_build(self.head, fake_dist(Path(self.tmp.name) / 'd'), check_sources=False)
+        self.assertEqual(sorted(files), ['site/assets/app.js', 'site/index.html'])
+        self.assertEqual(problems, [])
+
+    def test_reserved_paths_are_a_problem(self):
+        dist = fake_dist(Path(self.tmp.name) / 'd', {'reference.json': b'{}', 'legacy/index.html': b'x'})
+        _, problems = bundle.frontend_build(self.head, dist, check_sources=False)
+        self.assertEqual(len(problems), 2, problems)
+
+    def test_build_older_than_the_sources_is_a_problem(self):
+        problems = bundle.source_problems(self.head, built_at=0)
+        self.assertTrue(any('npm run build again' in p for p in problems), problems)
+
+    def test_sources_of_another_commit_are_a_problem(self):
+        first = subprocess.run(['git', '-C', str(ROOT), 'rev-list', '--max-parents=0', 'HEAD'], capture_output=True,
+                               text=True).stdout.split()[-1]
+        problems = bundle.source_problems(first, built_at=float('inf'))
+        self.assertIn(f'frontend source differs from {first[:12]}: frontend/src/App.jsx', problems)
+
+    def test_build_output_is_git_ignored(self):
+        result = subprocess.run(['git', '-C', str(ROOT), 'check-ignore', 'frontend/dist/index.html',
+                                 'frontend/node_modules/x'], capture_output=True, text=True)
+        self.assertEqual(result.stdout.split(), ['frontend/dist/index.html', 'frontend/node_modules/x'])
 
 
 if __name__ == '__main__':

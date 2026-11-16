@@ -6,7 +6,8 @@
 #   deploy/aws/deploy.sh --bundle-only DIR      only build and check the bundle into DIR (no network)
 #
 # 1. deploy/aws/bundle.py : `git archive main` of the include list minus the exclusion list (both in bundle.py), the
-#    demo screen built with --api, and the checks (no excluded path, no key pattern, no model text, no large file).
+#    React build frontend/dist (C-19-10 : run `npm ci` and `npm run build` in frontend first ; no Node on the server),
+#    and the checks (no excluded path, no key pattern, no model text, no large file, dist built from main's sources).
 # 2. scp the bundle and remote-install.sh to the server, run it with sudo : release folder → venv →
 #    storage init → storage demo-all → service.load_demo check (any difference stops before the switch) → API restart →
 #    Caddy reload.
@@ -47,7 +48,7 @@ say "== 묶음 만들기 ($REF 의 커밋된 파일만)"
 "$PYTHON" -B "$SCRIPT_DIR/bundle.py" build --ref "$REF" --out "$WORK" > "$WORK/bundle-summary.json" \
     || { cat "$WORK/bundle-summary.json"; die "묶음 검사에 걸렸다 (problems)"; }
 "$PYTHON" -I -c 'import json, sys; s = json.load(open(sys.argv[1]))
-print(f"commit {s["commit"][:12]} · 파일 {s["files"]} 개 · 압축 전 {s["bytes"]:,} B · 묶음 {s["bundle_bytes"]:,} B · 화면 세션 {s["screen"]["sessions"]}")' \
+print(f"commit {s["commit"][:12]} · 파일 {s["files"]} 개 · 압축 전 {s["bytes"]:,} B · 묶음 {s["bundle_bytes"]:,} B · React {s["frontend"]["files"]} 파일 · 참고 세션 {s["frontend"]["reference_sessions"]}")' \
     "$WORK/bundle-summary.json"
 if [[ -n "$BUNDLE_ONLY" ]]; then
     say "묶음만 만들었다 : $WORK/bundle.tar.gz (목록 $WORK/bundle-files.txt)"
