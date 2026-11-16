@@ -443,7 +443,7 @@ def create_app(*, accounts=None, live=None, transport=None, workdir=None, max_bo
             inner.repository.declared.pop(key, None)
         return gateway.relay(response)
 
-    async def existing(request, method, path, *, log=False):
+    async def existing(request, method, path):
         started = await start(request)
         if isinstance(started, Response):
             return started
@@ -453,12 +453,7 @@ def create_app(*, accounts=None, live=None, transport=None, workdir=None, max_bo
         inner = gateway.routed(project, key)
         if inner is None:
             return unknown_session()
-        response = await gateway.forward(inner, method, path, request, key, raw)
-        if log and response.status_code == 200:
-            # The runner reads only meta ; turns (request and response bodies) and observations stay in the proxy.
-            record = response.json()
-            return JSONResponse({k: record.get(k) for k in ('session_id', 'status', 'meta')})
-        return gateway.relay(response)
+        return gateway.relay(await gateway.forward(inner, method, path, request, key, raw))
 
     @app.post('/sessions/observations')
     async def observations(request: Request):
@@ -470,7 +465,10 @@ def create_app(*, accounts=None, live=None, transport=None, workdir=None, max_bo
 
     @app.get('/log')
     async def session_log(request: Request):
-        return await existing(request, 'GET', '/log', log=True)
+        # The proxy's record of the caller's own session, to the holder of its project's key only : the runner keeps
+        # it as session.json (turns, token totals) exactly as from the Mac proxy. It lives in this process's memory
+        # and is never written to the DB or a file here.
+        return await existing(request, 'GET', '/log')
 
     @app.get('/conditions')
     async def conditions(request: Request):

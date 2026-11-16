@@ -350,7 +350,8 @@ async def run_dialogue(args, scenario, scenario_path, run_conditions=None):
                'X-Guardrail-Run-Index': str(args.run_index),
                'X-Guardrail-Framework-Version': 'autogen-agentchat/' + versions['autogen-agentchat'],
                'X-Guardrail-Context-Buffer-Messages': str(buffer_messages) if buffer_messages is not None else 'none',
-               'X-Guardrail-Phase': phase}
+               'X-Guardrail-Phase': phase,
+               **common.gateway_headers()}  # C-19-9 : the service gateway's key, only when GUARDRAIL_GATEWAY_KEY is set
     budget = common.CallBudget(scenario.termination.max_llm_calls_per_step, sent, scenario.reasoning_effort,
                                final_report_allowlist=True)
     base = args.proxy_url.rstrip('/').removesuffix('/v1')

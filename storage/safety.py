@@ -71,6 +71,7 @@ _SECRET_ENVS = (
     "GROQ_API_KEY",
     "OPENAI_API_KEY",
     "GUARDRAIL_KEY",
+    "GUARDRAIL_GATEWAY_KEY",  # C-19-9 : the MAG API key the runner sends to the service gateway
     "POSTGRES_PASSWORD",
     "GUARDRAIL_DB_URL",
 )

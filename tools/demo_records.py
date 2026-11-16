@@ -50,7 +50,7 @@ REQUIRED_FILES = ('conditions.json', 'summary.json', 'scenario.yaml', RECORD_DIR
                   RECORD_DIR + '/demo-summary.json', RECORD_DIR + '/judgements.json')
 MAX_FILE_BYTES = 256 * 1024
 MAX_SESSION_BYTES = 1024 * 1024
-KEY_ENVS = ('KMU_API_KEY', 'TAVILY_API_KEY')
+KEY_ENVS = ('KMU_API_KEY', 'TAVILY_API_KEY', 'GUARDRAIL_GATEWAY_KEY')  # C-19-9 : + MAG key
 # Observation fields kept in record/judgements.json: no conversation, evidence or extraction (model text).
 JUDGEMENT_FIELDS = ('step_id', 'agent_id', 'observed_at', 'judgement_ns')
 COLLECTION_FIELDS = ('final_output_status', 'final_output_reason', 'measurement_status', 'metric_status')

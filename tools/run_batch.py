@@ -43,7 +43,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import criteria_freeze  # noqa: E402
-from experiment_config import load_run_conditions  # noqa: E402
+from experiment_config import gateway_headers, load_run_conditions  # noqa: E402
 from scenario_schema import load_scenario  # noqa: E402
 
 PLAN_VERSION = 'demo-batch-plan-v1'
@@ -170,7 +170,8 @@ def item_state(sessions):
 
 def proxy_conditions(url):
     import httpx
-    response = httpx.get(url.rstrip('/') + '/conditions', timeout=10)
+    # C-19-9 : the service gateway answers /conditions only with a MAG API key (GUARDRAIL_GATEWAY_KEY).
+    response = httpx.get(url.rstrip('/') + '/conditions', timeout=10, headers=gateway_headers())
     response.raise_for_status()
     return response.json()
 

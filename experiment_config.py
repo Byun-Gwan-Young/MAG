@@ -13,6 +13,17 @@ DEFAULT_UPSTREAM = {"base_url": "https://api.groq.com/openai/v1",
 # DM-7: block exists for the demo only. Without the key a configuration is observe, as every earlier one was.
 GUARDRAIL_MODES = ("observe", "block")
 PHASE_HEADER = "X-Guardrail-Phase"
+# C-19-9 : the service gateway (service/gateway.py) takes a MAG API key in this header. The runner and the batch runner
+# send it only when this variable is set in their window ; without it nothing changes (the Mac proxy path).
+GATEWAY_KEY_ENV = "GUARDRAIL_GATEWAY_KEY"
+GATEWAY_KEY_HEADER = "X-Guardrail-Key"
+
+
+def gateway_headers(environ=None):
+    """{X-Guardrail-Key: key} when GUARDRAIL_GATEWAY_KEY is set, otherwise {}. The value is only put on the request;
+    it is never written to a file or printed."""
+    key = (os.environ if environ is None else environ).get(GATEWAY_KEY_ENV)
+    return {GATEWAY_KEY_HEADER: key} if key else {}
 
 
 def config_file(path=None):

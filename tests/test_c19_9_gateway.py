@@ -239,7 +239,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.live.named('end_live_session'), [('p11-s1', 'max_steps', 6, 30, 6)])
 
-    async def test_runner_style_session_start_uses_the_demo_pin_and_log_carries_meta_only(self):
+    async def test_runner_style_session_start_uses_the_demo_pin_and_log_is_the_proxy_record(self):
         headers = self.headers(session='run-1')
         registration = {'registration_version': 'session-registration-v1',
                         'role_labels': {'planner': '기획', 'developer': '개발', 'reviewer': '검토'},
@@ -248,7 +248,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.post('/sessions', headers=headers, json={'registration': registration})
         self.assertEqual((response.status_code, response.json()), (200, {'session_id': 'run-1', 'registered': True}))
         log = (await self.client.get('/log', headers=headers)).json()
-        self.assertEqual(set(log), {'session_id', 'status', 'meta'})
+        self.assertEqual(set(log), {'session_id', 'status', 'meta', 'turns', 'observations'})
         self.assertEqual(log['meta']['pinned_model']['name'], DEMO_MODEL)
         self.assertEqual(log['meta']['pinned_model']['source'], 'run_conditions')
         registration = SessionRegistration.model_validate(registration).model_dump()

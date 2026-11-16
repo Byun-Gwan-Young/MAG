@@ -20,7 +20,7 @@ from tools.analyze_session import SEARCH_SECRET_PATTERNS, SECRET_PATTERNS  # noq
 SCHEMA = Path(__file__).resolve().parent / 'schema.sql'
 DB_URL_ENV = 'GUARDRAIL_DB_URL'
 DB_NAME = 'guardrail_demo'
-KEY_ENVS = ('KMU_API_KEY', 'TAVILY_API_KEY', 'GROQ_API_KEY')
+KEY_ENVS = ('KMU_API_KEY', 'TAVILY_API_KEY', 'GROQ_API_KEY', 'GUARDRAIL_GATEWAY_KEY')  # C-19-9 : + MAG key
 TABLES = ('aggregates', 'steps', 'sessions', 'scenarios')   # delete order (children first)
 JSON_COLUMNS = {'stop_steps', 'failure_reasons', 'changed_paths', 'facts', 'plans', 'inputs', 'body', 'role_labels'}
 BOOL_COLUMNS = {'frozen', 'git_dirty', 'counted', 'blocked'}

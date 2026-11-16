@@ -27,7 +27,7 @@ DIALOGUE_ONLY = ('dialogue_flow', 'recent_messages_rule')
 SEARCH_TOOLS = ('web_search', 'academic_search')
 # Group field -> conditions.json key, where they differ.
 CONDITIONS_KEY = {'search_settings_sha256': 'tool_settings'}
-KEY_ENVS = ('KMU_API_KEY', 'TAVILY_API_KEY')
+KEY_ENVS = ('KMU_API_KEY', 'TAVILY_API_KEY', 'GUARDRAIL_GATEWAY_KEY')  # C-19-9 : + MAG key
 
 
 def load(path):

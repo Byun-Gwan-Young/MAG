@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT))
 import httpx
 from pydantic import BaseModel, ConfigDict
 from progress_schema import Conversation
+from experiment_config import gateway_headers
 from artifact_hook import capture_artifact, make_observation, submit_observation
 from scenario_schema import load_scenario, registration_for, resolve_run_conditions
 from scenario_checks import check_acceptance
@@ -587,6 +588,7 @@ async def run(args):
     headers['X-Guardrail-Context-Buffer-Messages'] = str(buffer_messages) if buffer_messages is not None else 'none'
     if phase is not None:
         headers['X-Guardrail-Phase'] = phase
+    headers.update(gateway_headers())  # C-19-9 : the service gateway's key, only when GUARDRAIL_GATEWAY_KEY is set
     budget = CallBudget(scenario.termination.max_llm_calls_per_step, contract,
                         scenario.reasoning_effort if reasoning_protocol else None,
                         final_report_allowlist=runner_protocol == PROTOCOL_V10)
