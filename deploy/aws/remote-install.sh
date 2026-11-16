@@ -13,6 +13,7 @@
 # 4. DM-108 : the service backend (backend/, Google sign-in) on 127.0.0.1:8030 : /etc/guardrail/backend.env (DB URL,
 #    sign-in URI on DOMAIN, secure cookie, and GOOGLE_CLIENT_ID when given ; an empty argument keeps the one already
 #    on the server), its unit, restart, and wait for /login. Without a client ID the page says it is not set up yet.
+#    C-19-8K : also GUARDRAIL_DEFAULT_PROVIDER (kmu) and GUARDRAIL_PROVIDER_KMU_URL ; values already there are kept.
 set -euo pipefail
 
 BUNDLE=${1:-}
@@ -76,12 +77,22 @@ systemctl restart guardrail-api
 
 step "백엔드 (구글 로그인, 127.0.0.1:8030) : backend.env · 유닛 · 재시작 (DM-108)"
 [[ -n "$CLIENT_ID" ]] || CLIENT_ID=$(sed -n 's/^GOOGLE_CLIENT_ID=//p' "$BACKEND_ENV" 2>/dev/null | tail -n 1)
+# C-19-8K part 0 : creating a project needs a default provider. PM : kmu (the school gateway, the demo's upstream).
+# A value already on the server is kept. Neither line is a secret (no key, only a provider name and a public URL).
+DEFAULT_PROVIDER=$(sed -n 's/^GUARDRAIL_DEFAULT_PROVIDER=//p' "$BACKEND_ENV" 2>/dev/null | tail -n 1)
+[[ -n "$DEFAULT_PROVIDER" ]] || DEFAULT_PROVIDER=kmu
+[[ "$DEFAULT_PROVIDER" =~ ^[a-z0-9][a-z0-9_-]{0,31}$ ]] || die "backend.env 의 GUARDRAIL_DEFAULT_PROVIDER 모양이 아니다"
+KMU_URL=$(sed -n 's/^GUARDRAIL_PROVIDER_KMU_URL=//p' "$BACKEND_ENV" 2>/dev/null | tail -n 1)
+[[ -n "$KMU_URL" ]] || KMU_URL=https://factchat.mindlogic-kr-api.com/v1/gateway    # = upstream.base_url of guardrail-deadlock-v0.3-kmu.yaml
+[[ "$KMU_URL" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._~/-]*)?$ ]] || die "backend.env 의 GUARDRAIL_PROVIDER_KMU_URL 모양이 아니다"
 tmp=$(umask 027 && mktemp "$BACKEND_ENV.XXXXXX")
 {
     printf 'GUARDRAIL_DB_URL=%s\n' "$DB_URL"
     printf 'GOOGLE_LOGIN_URI=https://%s/api/auth/google\n' "$DOMAIN"
     printf 'AUTH_COOKIE_SECURE=true\n'
     printf 'GUARDRAIL_OPEN_SIGNUP=true\n'    # DM-109 : any verified Google account the OAuth app lets through
+    printf 'GUARDRAIL_DEFAULT_PROVIDER=%s\n' "$DEFAULT_PROVIDER"
+    printf 'GUARDRAIL_PROVIDER_KMU_URL=%s\n' "$KMU_URL"
     [[ -z "$CLIENT_ID" ]] || printf 'GOOGLE_CLIENT_ID=%s\n' "$CLIENT_ID"
 } > "$tmp"
 chown root:guardrail "$tmp" && chmod 640 "$tmp" && mv "$tmp" "$BACKEND_ENV"

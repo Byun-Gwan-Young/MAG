@@ -189,7 +189,8 @@ class Scripts(unittest.TestCase):
 
     def test_no_target_value_or_secret_in_deploy_files(self):
         allowed_ips = {'0.0.0.0', '127.0.0.1'}
-        allowed_hosts = {'checkip.amazonaws.com', 'dl.cloudsmith.io', 'demo.example.com'}
+        # C-19-8K : the school gateway is the demo's public upstream (guardrail-deadlock-v0.3-kmu.yaml), not a target value.
+        allowed_hosts = {'checkip.amazonaws.com', 'dl.cloudsmith.io', 'demo.example.com', 'factchat.mindlogic-kr-api.com'}
         for path in sorted(AWS.iterdir()):
             if path.name == 'target.env' or not path.is_file():
                 continue
@@ -231,6 +232,42 @@ class Scripts(unittest.TestCase):
         self.assertIn('[[ -n "$CLIENT_ID" ]] || CLIENT_ID=$(sed -n', text)   # an empty argument keeps the server's
         self.assertIn('chown root:guardrail "$tmp" && chmod 640 "$tmp"', text)
         self.assertNotRegex(text, r'(?i)client_secret|GOOGLE_CLIENT_SECRET')
+
+    def _provider_lines(self, existing):
+        """Run the C-19-8K provider block of remote-install.sh against a fake backend.env ; return what it would write."""
+        text = (AWS / 'remote-install.sh').read_text(encoding='utf-8')
+        start = text.index('DEFAULT_PROVIDER=$(sed -n')
+        end = text.index('tmp=$(umask 027 && mktemp "$BACKEND_ENV.XXXXXX")')
+        with tempfile.TemporaryDirectory() as tmp:
+            env_file = Path(tmp) / 'backend.env'
+            if existing is not None:
+                env_file.write_text(existing, encoding='utf-8')
+            script = ('die() { printf "%s\\n" "$*" >&2; exit 1; }\nBACKEND_ENV="$1"\n' + text[start:end]
+                      + 'printf "%s\\n%s\\n" "$DEFAULT_PROVIDER" "$KMU_URL"\n')
+            result = subprocess.run(['/bin/bash', '-c', script, '_', str(env_file)], capture_output=True, text=True)
+        return result.returncode, result.stdout.split()
+
+    def test_backend_env_default_provider_is_kmu_and_kept(self):
+        import yaml
+        frozen = yaml.safe_load((ROOT / 'guardrail-deadlock-v0.3-kmu.yaml').read_text(encoding='utf-8'))
+        kmu_url = frozen['upstream']['base_url']
+        self.assertEqual(self._provider_lines(None), (0, ['kmu', kmu_url]))        # first install : PM decision kmu
+        self.assertEqual(self._provider_lines('GOOGLE_CLIENT_ID=x\n'), (0, ['kmu', kmu_url]))
+        kept = 'GUARDRAIL_DEFAULT_PROVIDER=groq\nGUARDRAIL_PROVIDER_KMU_URL=https://gw.example.test/v1\n'
+        self.assertEqual(self._provider_lines(kept), (0, ['groq', 'https://gw.example.test/v1']))   # already there : kept
+        self.assertNotEqual(self._provider_lines('GUARDRAIL_DEFAULT_PROVIDER=bad value\n')[0], 0)
+        self.assertNotEqual(self._provider_lines('GUARDRAIL_PROVIDER_KMU_URL=http://x.test/?key=1\n')[0], 0)
+        text = (AWS / 'remote-install.sh').read_text(encoding='utf-8')
+        self.assertIn("printf 'GUARDRAIL_DEFAULT_PROVIDER=%s\\n' \"$DEFAULT_PROVIDER\"", text)
+        self.assertIn("printf 'GUARDRAIL_PROVIDER_KMU_URL=%s\\n' \"$KMU_URL\"", text)
+
+    def test_default_provider_lines_let_a_project_be_created(self):
+        from unittest import mock
+        from storage import accounts
+        with mock.patch.dict(os.environ, {'GUARDRAIL_DEFAULT_PROVIDER': 'kmu',
+                                          'GUARDRAIL_PROVIDER_KMU_URL': self._provider_lines(None)[1][1]}):
+            self.assertEqual(accounts._get_default_provider_config(),
+                             ('kmu', 'https://factchat.mindlogic-kr-api.com/v1/gateway'))
 
     def test_client_id_and_email_shapes(self):
         lib = str(AWS / 'lib.sh')
