@@ -1,0 +1,11 @@
+# DM-117 본 계획 nc-main-v2 의 나머지 3 세션. 그 계획에서 MR 교착판 4 는 사용자 중단(user_interrupted, 4 step)으로 끝나
+# run_batch 가 '끝남' 으로 세어 다시 돌리지 않고, MR 교착판 5 는 시작 전, LR 교착판 3 은 모델 서버 502 (runner_error) 였다.
+# 같은 시나리오를 이 계획으로 돌린다 (반복 번호는 원래 번호 그대로). 원래 계획의 세 기록은 그대로 둔다.
+# 실행 : 레인 1 (MR 2) --lane 1 --lanes 2 / 레인 2 (LR 1) --lane 2 --lanes 2
+plan_version: demo-batch-plan-v1
+plan_id: nc-main-v2-rest
+requires_final_freeze: true
+description: nc-main-v2 나머지 — MR 교착 2 + LR 교착 1 (DM-117)
+items:
+- {scenario: scenarios/DEMO-MR-stall-v2.yaml, mode: observe, repeats: [4, 5]}
+- {scenario: scenarios/DEMO-LR-stall-v2.yaml, mode: observe, repeats: [3], one_at_a_time: true}
