@@ -2,7 +2,8 @@
 # No value is filled in here : {$GUARDRAIL_DOMAIN} comes from /etc/guardrail/caddy.env (root, 600 ; a systemd drop-in
 # hands it to caddy.service), written by remote-install.sh from deploy/aws/target.env.
 # DM-109 : no shared site password any more. DM-110 : the whole site is behind Google sign-in (forward_auth below) ;
-# only /login and /api/auth/* open without it.
+# only the sign-in page, the sign-in API and the sign-in page's own JS · CSS open without it.
+# C-19-10 (DM-111 · DM-114) : the screen is the React build (site/, a single-page app) ; /login is React too.
 
 {$GUARDRAIL_DOMAIN} {
 	# HTTPS : Caddy gets the certificate for the domain by itself.
@@ -17,18 +18,27 @@
 		-Server
 	}
 
-	# --- DM-110 : sign-in first. Every request except the sign-in page and sign-in API asks the backend ; no active
-	# session = the backend's 303 to /login goes back to the browser. forward_auth runs before the handle blocks. ---
-	@gated not path /login /api/auth/*
+	# --- DM-110 : sign-in first. Every request except the sign-in page, the sign-in API and the built JS · CSS
+	# (/assets/*, which the sign-in page itself needs ; no data in them) asks the backend ; no active session = the
+	# backend's 303 to /login goes back to the browser. forward_auth runs before the handle blocks. ---
+	@gated not path /login /api/auth/* /assets/*
 	forward_auth @gated 127.0.0.1:8030 {
 		uri /api/auth/check
 	}
 
-	# --- service backend (DM-108, 127.0.0.1:8030) : Google sign-in page, sign-in API, the user's projects ---
+	# --- service backend (DM-108, 127.0.0.1:8030) : sign-in API, the user's projects ---
 	# Before @api : /api/auth/* and /api/projects* would otherwise fall into /api/*.
-	@backend path /login /api/auth/* /api/projects /api/projects/*
+	@backend path /api/auth/* /api/projects /api/projects/*
 	handle @backend {
 		reverse_proxy 127.0.0.1:8030
+	}
+
+	# --- C-19-10 : the frozen reference data the React screen reads (built into the bundle by bundle.py) ---
+	handle /api/frontend/reference {
+		root * /opt/guardrail/app/site
+		rewrite * /reference.json
+		header Cache-Control "no-store"
+		file_server
 	}
 
 	# --- query API (C-19-6, read-only, 127.0.0.1:8020) : only these paths go to the API ---
@@ -39,9 +49,19 @@
 
 	# --- C-19-9 : /v1/* and /sessions/* (service gateway, key-protected) blocks go here. Not open now. ---
 
-	# --- demo screen : static files (built with --api by deploy) ---
+	# --- React screen (static files, built on the PM's computer). Hashed JS · CSS are cached ; a missing one is a 404,
+	# never the page. Everything else : the file if there is one, else index.html (single-page app), never cached
+	# (bundle files carry no date, so a cached page could point at assets the next release removed). /legacy/ is the
+	# old Python screen kept for the presentation. ---
+	handle /assets/* {
+		root * /opt/guardrail/app/site
+		header Cache-Control "public, max-age=31536000, immutable"
+		file_server
+	}
 	handle {
 		root * /opt/guardrail/app/site
+		header Cache-Control "no-cache"
+		try_files {path} {path}/index.html /index.html
 		file_server
 	}
 }

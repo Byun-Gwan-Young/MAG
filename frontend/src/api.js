@@ -43,35 +43,9 @@ export const post = (path, body) =>
     body: JSON.stringify(body),
   });
 
-// Existing backend expects its session-cookie value, not /me's action CSRF, for logout.
-// Read the existing server-rendered form; never copy the token to storage or logs.
-export async function logout() {
-  const response = await fetch("/legacy-login", {
-    credentials: "same-origin",
-    cache: "no-store",
-  });
-  if (!response.ok)
-    throw new ApiError("로그아웃 화면을 불러오지 못했습니다.", response.status);
-  const doc = new DOMParser().parseFromString(
-    await response.text(),
-    "text/html",
-  );
-  const token = doc.querySelector(
-    'form[action="/api/auth/logout"] input[name="csrf_token"]',
-  )?.value;
-  if (!token)
-    throw new ApiError(
-      "로그인 세션을 확인할 수 없습니다. 다시 로그인해 주세요.",
-      401,
-    );
-  const form = document.createElement("form");
-  form.method = "POST";
-  form.action = "/api/auth/logout";
-  const input = document.createElement("input");
-  input.type = "hidden";
-  input.name = "csrf_token";
-  input.value = token;
-  form.append(input);
-  document.body.append(form);
-  form.submit();
+// C-19-10 (DM-114): sign out with the per-session CSRF token /api/auth/me returned.
+// The token stays in memory only; never copy it to storage or logs.
+export async function logout(csrfToken) {
+  await post("/api/auth/signout", { csrf_token: csrfToken });
+  location.assign("/login");
 }

@@ -96,8 +96,10 @@ tmp=$(umask 077 && mktemp "$CADDY_ENV.XXXXXX")
 # DM-109 : the old shared-password lines (GUARDRAIL_BASIC_AUTH_*) are dropped with the basic auth block.
 { grep -v -e '^GUARDRAIL_DOMAIN=' -e '^GUARDRAIL_BASIC_AUTH_' "$CADDY_ENV" || true; printf 'GUARDRAIL_DOMAIN=%s\n' "$DOMAIN"; } > "$tmp"
 chmod 600 "$tmp" && mv "$tmp" "$CADDY_ENV"
+# C-19-10 : check the new Caddyfile before it replaces the one in use (a bad file never lands in /etc/caddy).
+( set -a; . "$CADDY_ENV"; set +a; caddy validate --config "$release/deploy/aws/Caddyfile.template" --adapter caddyfile >/dev/null ) \
+    || die "새 Caddyfile 검사 실패 — /etc/caddy/Caddyfile 은 그대로다"
 install -m 644 "$release/deploy/aws/Caddyfile.template" /etc/caddy/Caddyfile
-( set -a; . "$CADDY_ENV"; set +a; caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null )
 systemctl reload-or-restart caddy
 
 step "API 응답 (127.0.0.1:8020)"

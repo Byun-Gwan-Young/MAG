@@ -260,3 +260,70 @@ test("authenticated API, project create with CSRF, API failure and polling clean
   await page.getByRole("button", { name: "새로고침", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("DB");
 });
+
+test("C-19-10: sign-in config from the server, live monitor waits for the gateway, sign-out with the session CSRF", async ({
+  page,
+}) => {
+  let signedIn = false;
+  let liveCalls = 0;
+  const signouts = [];
+  await page.route("**/api/**", async (route) => {
+    const req = route.request();
+    const path = new URL(req.url()).pathname;
+    const respond = (body, status = 200) =>
+      route.fulfill({
+        status,
+        contentType: "application/json",
+        body: JSON.stringify(body),
+      });
+    if (path === "/api/auth/config")
+      return respond({
+        google_client_id: "",
+        login_uri: "",
+        open_signup: true,
+      });
+    if (path === "/api/auth/me")
+      return signedIn
+        ? respond(user)
+        : respond({ detail: "Login required" }, 401);
+    if (path === "/api/auth/signout") {
+      signouts.push(req.postDataJSON());
+      signedIn = false;
+      return respond({ login_required: true });
+    }
+    if (path === "/api/frontend/reference") return respond(data);
+    if (path === "/api/summary")
+      return respond({
+        headline: data.headline,
+        judgement_ms: data.judgement_ms,
+      });
+    if (path === "/api/sessions") return respond({ count: 0, sessions: [] });
+    if (path.startsWith("/api/live/")) {
+      liveCalls++;
+      return respond({ detail: "Not Found" }, 404);
+    }
+    return respond({ detail: "Not found" }, 404);
+  });
+  await page.goto("/login");
+  await expect(
+    page.getByRole("heading", { name: "실험 워크스페이스에 로그인" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Google 클라이언트 ID가 필요합니다"),
+  ).toBeVisible();
+  signedIn = true;
+  await page.goto("/#live");
+  await expect(page.getByText("서버 게이트웨이 준비 중")).toBeVisible();
+  await page.waitForTimeout(3000);
+  expect(liveCalls).toBe(1);
+  await page
+    .getByRole("navigation")
+    .getByRole("button", { name: "내 계정", exact: true })
+    .click();
+  await page.getByRole("button", { name: "로그아웃", exact: true }).click();
+  await page.waitForURL("**/login");
+  expect(signouts).toEqual([{ csrf_token: user.csrf_token }]);
+  await expect(
+    page.getByRole("heading", { name: "실험 워크스페이스에 로그인" }),
+  ).toBeVisible();
+});

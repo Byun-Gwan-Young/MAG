@@ -1,7 +1,7 @@
 """C-19-7 part 3 : the AWS deploy files (deploy/aws/), checked offline. No AWS call, no SSH, no network.
 
-Checked : the Caddyfile template (basic auth over the whole site, only the API path list goes to 127.0.0.1:8020, no
-value filled in), the systemd unit, shell syntax under macOS /bin/bash 3.2, provision.sh with a fake AWS CLI and curl
+Checked : the Caddyfile template (sign-in first, only the API path list goes to 127.0.0.1:8020, the React screen as a
+single-page app from site/ (C-19-10), no value filled in), the systemd unit, shell syntax under macOS /bin/bash 3.2, provision.sh with a fake AWS CLI and curl
 on PATH (nothing is created without --apply and "yes" ; with them the target file holds no account ID), teardown.sh
 (nothing is deleted without "delete"), no domain/IP/password/key value in the deploy files, the git-ignored target
 file, the server package pins, the remote install order (check before the switch), and the server bundle built from
@@ -115,25 +115,42 @@ class CaddyAndUnit(unittest.TestCase):
         self.assertEqual(re.findall(r'^@api path (.+)$', self.code, re.M), ['/api/* /docs /redoc /openapi.json'])
         self.assertEqual(re.findall(r'reverse_proxy (\S+)', self.code), ['127.0.0.1:8030', '127.0.0.1:8020'])
         self.assertIn('handle @api {\nreverse_proxy 127.0.0.1:8020\n}', self.code)
-        self.assertIn('handle {\nroot * /opt/guardrail/app/site\nfile_server\n}', self.code)
         for later in ('/v1', '/sessions'):
             self.assertNotIn(later, self.code)   # C-19-9 blocks are comments only
             self.assertIn(later, self.caddy)
 
     def test_everything_but_sign_in_asks_the_backend_first(self):
-        # DM-110 : forward_auth on every path except the sign-in page and sign-in API.
-        self.assertEqual(re.findall(r'^@gated (.+)$', self.code, re.M), ['not path /login /api/auth/*'])
+        # DM-110 : forward_auth on every path except the sign-in page, the sign-in API and (C-19-10) the built JS · CSS
+        # the React sign-in page loads. Data (/records.json, /reference.json, /api/frontend/reference) stays gated.
+        self.assertEqual(re.findall(r'^@gated (.+)$', self.code, re.M), ['not path /login /api/auth/* /assets/*'])
         self.assertIn('forward_auth @gated 127.0.0.1:8030 {\nuri /api/auth/check\n}', self.code)
         self.assertLess(self.code.index('forward_auth'), self.code.index('handle @backend'))
 
     def test_only_the_sign_in_paths_go_to_the_backend_before_the_api(self):
         # DM-108 : /api/auth/* and /api/projects* must not fall into the query API's /api/*.
+        # C-19-10 : /login is the React screen now, not the backend template.
         self.assertEqual(re.findall(r'^@backend path (.+)$', self.code, re.M),
-                         ['/login /api/auth/* /api/projects /api/projects/*'])
+                         ['/api/auth/* /api/projects /api/projects/*'])
         self.assertIn('handle @backend {\nreverse_proxy 127.0.0.1:8030\n}', self.code)
         self.assertLess(self.code.index('handle @backend'), self.code.index('handle @api'))
         for header in ('Strict-Transport-Security', 'X-Content-Type-Options', 'X-Frame-Options', 'Referrer-Policy'):
             self.assertIn(header, self.code)
+
+    def test_react_screen_is_a_single_page_app_from_site(self):
+        # C-19-10 : the React build under site/ ; unknown paths get index.html ; the page is never cached, the hashed
+        # assets are ; a missing asset is a 404 (its own handle, no fallback).
+        self.assertIn('handle /assets/* {\nroot * /opt/guardrail/app/site\n'
+                      'header Cache-Control "public, max-age=31536000, immutable"\nfile_server\n}', self.code)
+        self.assertIn('handle {\nroot * /opt/guardrail/app/site\nheader Cache-Control "no-cache"\n'
+                      'try_files {path} {path}/index.html /index.html\nfile_server\n}', self.code)
+        self.assertTrue(self.code.rstrip().endswith('file_server\n}\n}'))   # the catch-all handle is the last block
+        self.assertLess(self.code.index('handle /assets/*'), self.code.index('handle {\nroot'))
+
+    def test_frontend_reference_is_the_bundled_file(self):
+        # C-19-10 : /api/frontend/reference (React) = site/reference.json from bundle.py, before the query API's /api/*.
+        self.assertIn('handle /api/frontend/reference {\nroot * /opt/guardrail/app/site\nrewrite * /reference.json\n'
+                      'header Cache-Control "no-store"\nfile_server\n}', self.code)
+        self.assertLess(self.code.index('handle /api/frontend/reference'), self.code.index('handle @api'))
 
     def test_api_unit(self):
         unit = (AWS / 'guardrail-api.service').read_text(encoding='utf-8')
@@ -200,6 +217,9 @@ class Scripts(unittest.TestCase):
                                          'http://127.0.0.1:8030/login')]
         self.assertEqual(order, sorted(order))
         self.assertIn('caddy validate', text)
+        # C-19-10 : the new Caddyfile is checked in the release folder before it replaces the one in use.
+        self.assertLess(text.index('caddy validate --config "$release/deploy/aws/Caddyfile.template"'),
+                        text.index('install -m 644 "$release/deploy/aws/Caddyfile.template" /etc/caddy/Caddyfile'))
 
     def test_backend_env_keeps_the_client_id_and_never_a_secret(self):
         text = (AWS / 'remote-install.sh').read_text(encoding='utf-8')

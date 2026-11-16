@@ -34,7 +34,7 @@ class LocalAdapterTests(unittest.TestCase):
 
     def test_original_auth_query_and_live_routes_are_registered(self):
         paths = self.scope['app'].openapi()['paths']
-        for path in ('/api/auth/google', '/api/projects', '/api/summary', '/api/sessions/{session_id}/steps', '/api/live/sessions'):
+        for path in ('/api/auth/google', '/api/auth/config', '/api/auth/signout', '/api/projects', '/api/summary', '/api/sessions/{session_id}/steps', '/api/live/sessions'):
             self.assertIn(path, paths)
 
     def test_reference_preserves_all_curated_sessions(self):

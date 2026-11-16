@@ -1,10 +1,29 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowRight, ShieldCheck } from "lucide-react";
+import { request } from "./api.js";
+
+// C-19-10: the server tells the sign-in page its Google client ID at run time
+// (/api/auth/config), so the build carries no server value. VITE_GOOGLE_CLIENT_ID
+// stays as the local-development fallback.
+function useSignInConfig() {
+  const [config, setConfig] = useState(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    request("/api/auth/config", { signal: controller.signal })
+      .then(setConfig)
+      .catch(() => !controller.signal.aborted && setConfig({}));
+    return () => controller.abort();
+  }, []);
+  return config;
+}
 
 export default function Login() {
   const mount = useRef(null);
   const [error, setError] = useState("");
-  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+  const config = useSignInConfig();
+  const clientId =
+    config?.google_client_id || import.meta.env.VITE_GOOGLE_CLIENT_ID;
+  const loginUri = config?.login_uri || `${location.origin}/api/auth/google`;
   useEffect(() => {
     if (!clientId) return;
     let active = true;
@@ -15,7 +34,7 @@ export default function Login() {
       window.google.accounts.id.initialize({
         client_id: clientId,
         ux_mode: "redirect",
-        login_uri: `${location.origin}/api/auth/google`,
+        login_uri: loginUri,
         auto_select: false,
       });
       window.google.accounts.id.renderButton(mount.current, {
@@ -44,7 +63,7 @@ export default function Login() {
       active = false;
       existing?.removeEventListener("load", initialize);
     };
-  }, [clientId]);
+  }, [clientId, loginUri]);
   return (
     <div className="login-layout">
       <section className="login-story">
@@ -82,28 +101,43 @@ export default function Login() {
           <p className="eyebrow">WELCOME BACK</p>
           <h2>실험 워크스페이스에 로그인</h2>
           <p>
-            허용된 Google 계정으로 계속하세요.
+            {config?.open_signup === false
+              ? "허용된 Google 계정으로 계속하세요."
+              : "Google 계정으로 계속하세요."}
             <br />첫 로그인 시 서비스 계정이 생성됩니다.
           </p>
           <div ref={mount} className="google-button" />
-          {!clientId && (
+          {config && !clientId && (
             <div className="notice">
               Google 클라이언트 ID가 필요합니다.{" "}
-              <code>frontend/.env.local</code>의{" "}
-              <code>VITE_GOOGLE_CLIENT_ID</code>를 설정하고 개발 서버를 다시
-              실행해 주세요.
+              {import.meta.env.DEV ? (
+                <>
+                  <code>frontend/.env.local</code>의{" "}
+                  <code>VITE_GOOGLE_CLIENT_ID</code>를 설정하고 개발 서버를 다시
+                  실행해 주세요.
+                </>
+              ) : (
+                "서버 설정을 확인해 주세요."
+              )}
             </div>
           )}
           {error && <p role="alert">{error}</p>}
           <p className="muted small">
             Google 비밀번호는 이 서비스에 전달되지 않습니다.
-            <br />
-            로컬 로그인은 localhost 주소로 통일하세요.
+            {import.meta.env.DEV && (
+              <>
+                <br />
+                로컬 로그인은 localhost 주소로 통일하세요.
+              </>
+            )}
           </p>
-          <a className="preview-link" href="/?preview=1">
-            저장된 데모 먼저 살펴보기
-            <ArrowRight size={16} />
-          </a>
+          {/* The server opens no data before sign-in (DM-110), so the saved-demo preview link is local only. */}
+          {import.meta.env.DEV && (
+            <a className="preview-link" href="/?preview=1">
+              저장된 데모 먼저 살펴보기
+              <ArrowRight size={16} />
+            </a>
+          )}
         </div>
       </section>
     </div>

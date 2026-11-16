@@ -5,19 +5,23 @@
 ## 구조
 
 ```text
-브라우저 (팀원 · 교수님)
-   │ HTTPS · 구글 로그인 먼저 (DM-110, forward_auth) — 로그인 전에는 /login 만
+브라우저
+   │ HTTPS · 구글 로그인 먼저 (DM-110, forward_auth) — 로그인 전에는 /login · /api/auth/* · /assets/* 만
    ▼
 Caddy  (서버, 80 · 443 만 열림, 인증서 자동)
-   ├─ /                         → 데모 화면 정적 파일 (/opt/guardrail/app/site/index.html, --api 로 빌드)
-   └─ /api/* · /docs · /redoc · /openapi.json
-                                → 조회 API (service/api.py, 127.0.0.1:8020, 읽기 전용, systemd guardrail-api)
-                                     │ 유닉스 소켓 · peer 인증 (비밀번호 없음)
-                                     ▼
-                                  PostgreSQL guardrail_demo (같은 서버, 외부 포트 없음)
+   ├─ /api/auth/* · /api/projects*  → 백엔드 (backend/, 127.0.0.1:8030, 구글 로그인 · 계정 · 프로젝트)
+   ├─ /api/frontend/reference       → site/reference.json (묶음에 든 동결 참고 데이터)
+   ├─ /api/* · /docs · /redoc · /openapi.json
+   │                                → 조회 API (service/api.py, 127.0.0.1:8020, 읽기 전용, systemd guardrail-api)
+   │                                     │ 유닉스 소켓 · peer 인증 (비밀번호 없음)
+   │                                     ▼
+   │                                  PostgreSQL guardrail_demo (같은 서버, 외부 포트 없음)
+   ├─ /assets/*                     → React 빌드의 JS · CSS (해시 이름, 오래 캐시)
+   └─ 나머지 (/, /login, …)          → React 화면 (site/index.html, 단일 페이지 앱, 캐시 안 함)
+                                      /legacy/ 는 발표 대비 옛 파이썬 화면
 ```
 
-화면은 서버에서 열리면 같은 서버의 `/api/summary` 를 물어보고, 응답이 오면 대시보드 카드 · 세션 표 · 세션 step 을 API(DB)에서 읽습니다. 응답이 없으면 화면 안에 담긴 기록을 그대로 씁니다. 화면 맨 아래 출처 줄에 어느 쪽인지 나옵니다 ("데이터 : DB (조회 API)" / "데이터 : 파일에 담긴 기록").
+React 화면은 같은 서버의 API (`/api/auth/me` · `/api/summary` · `/api/sessions` · `/api/projects` …) 를 불러 보여 주기만 합니다. 실시간 모니터 (`/api/live/*`) 는 서비스 게이트웨이 (C-19-9) 전까지 "서버 게이트웨이 준비 중" 으로 나옵니다.
 
 ## 파일
 
@@ -31,7 +35,7 @@ Caddy  (서버, 80 · 443 만 열림, 인증서 자동)
 | [`deploy.sh`](deploy.sh) | 맥 | 묶음 만들기 → 보내기 → 서버 설치 (`remote-install.sh`) → 확인 결과 가져오기 → `https://도메인/api/summary` 확인 |
 | [`bundle.py`](bundle.py) | 맥 | 서버로 가는 묶음 : `git archive main` 의 포함 목록 − 제외 목록, React 빌드 (`frontend/dist`) · 참고 데이터 · 옛 화면, 검사 (빌드 JS · CSS 의 키 패턴 포함) |
 | [`remote-install.sh`](remote-install.sh) | 서버 (deploy 가 실행) | 릴리스 폴더 → 가상환경 → `storage init` · `storage demo-all` · `service.load_demo check` (하나라도 다르면 멈춤, 이전 릴리스 유지) → API 재시작 → Caddy |
-| [`Caddyfile.template`](Caddyfile.template) | 서버 `/etc/caddy/Caddyfile` | HTTPS, 백엔드 (구글 로그인) · API 로 가는 경로 목록, 보안 헤더. 도메인 · 해시는 환경 파일에서 |
+| [`Caddyfile.template`](Caddyfile.template) | 서버 `/etc/caddy/Caddyfile` | HTTPS, 로그인 먼저, 백엔드 (구글 로그인) · API 로 가는 경로 목록, React 단일 페이지 앱, 보안 헤더. 도메인 · 해시는 환경 파일에서 |
 | [`guardrail-api.service`](guardrail-api.service) | 서버 systemd | 조회 API (`guardrail` 사용자, `127.0.0.1:8020`, `Restart=always`) |
 | [`lib.sh`](lib.sh) | — | 위 스크립트가 함께 쓰는 값 · 함수 |
 

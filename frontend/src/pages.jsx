@@ -900,12 +900,13 @@ export function Guide({ data, open }) {
 export function LivePage({ preview }) {
   const [rows, setRows] = useState([]);
   const [error, setError] = useState(null);
+  const [pending, setPending] = useState(false);
   const [updated, setUpdated] = useState(null);
   const [selected, setSelected] = useState(null);
   const [detail, setDetail] = useState(null);
   const [paused, setPaused] = useState(false);
   useEffect(() => {
-    if (preview || paused) return;
+    if (preview || paused || pending) return;
     let active = true;
     const controller = new AbortController();
     let timer;
@@ -927,6 +928,12 @@ export function LivePage({ preview }) {
           setError(null);
         }
       } catch (e) {
+        // C-19-10: the server has no live API until the service gateway (C-19-9).
+        if (active && e.status === 404 && !selected) {
+          active = false;
+          setPending(true);
+          return;
+        }
         if (active) setError(e);
       } finally {
         if (active) timer = setTimeout(poll, 2500);
@@ -938,13 +945,29 @@ export function LivePage({ preview }) {
       controller.abort();
       clearTimeout(timer);
     };
-  }, [preview, selected, paused]);
+  }, [preview, selected, paused, pending]);
   if (preview)
     return (
       <Panel title="실시간 모니터">
         <Empty title="저장된 기록 미리보기에서는 실시간 조회를 하지 않습니다">
           로그인한 로컬 실행에서 API를 연결해 주세요.
         </Empty>
+      </Panel>
+    );
+  if (pending)
+    return (
+      <Panel title="실시간 모니터">
+        <div className="feature-pending">
+          <span className="feature-icon">
+            <Activity size={32} />
+          </span>
+          <span className="badge">서버 게이트웨이 준비 중</span>
+          <h3>실시간 조회는 서비스 게이트웨이와 함께 열립니다</h3>
+          <p>
+            이 서버에는 아직 실시간 실행 기록 API가 없습니다. 저장된 실험은
+            대시보드와 세션 재생에서 볼 수 있습니다.
+          </p>
+        </div>
       </Panel>
     );
   return (
@@ -1216,7 +1239,7 @@ export function Account({ user, preview, refresh }) {
     setBusy(true);
     setError(null);
     try {
-      await logout();
+      await logout(user.csrf_token);
     } catch (e) {
       setError(e);
       setBusy(false);

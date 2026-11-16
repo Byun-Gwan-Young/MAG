@@ -180,7 +180,7 @@ export default function App() {
           </div>
           <span className={`connection ${preview ? "preview" : ""}`}>
             <i />
-            {preview ? "저장된 데모" : "로컬 API 연결"}
+            {preview ? "저장된 데모" : "API 연결"}
           </span>
         </header>
         <main id="main-content">

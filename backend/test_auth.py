@@ -110,6 +110,39 @@ class AuthTests(unittest.TestCase):
         self.client.post("/api/auth/logout", data={"csrf_token": token})
         self.assertEqual(self.client.get("/api/auth/me").status_code, 401)
 
+    def test_sign_in_config_is_public_and_holds_no_secret(self):
+        # C-19-10 : the React sign-in page reads the client ID at run time (no value baked into the build).
+        with patch.dict(os.environ, {"GOOGLE_LOGIN_URI": "https://demo.example.com/api/auth/google",
+                                     "GUARDRAIL_OPEN_SIGNUP": "true", "GOOGLE_CLIENT_SECRET": "not-for-the-page"}):
+            response = self.client.get("/api/auth/config")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["cache-control"], "no-store")
+        self.assertEqual(response.json(), {"google_client_id": "test.apps.googleusercontent.com",
+                                           "login_uri": "https://demo.example.com/api/auth/google",
+                                           "open_signup": True})
+        self.assertNotIn("not-for-the-page", response.text)
+        with patch.dict(os.environ, {"GOOGLE_CLIENT_ID": ""}):
+            self.assertEqual(self.client.get("/api/auth/config").json()["google_client_id"], "")
+
+    def test_json_signout_uses_the_session_csrf_token(self):
+        # C-19-10 (DM-114 ③ 다) : the React screen signs out with /api/auth/me's csrf_token, not the cookie value.
+        self.assertEqual(self.client.post("/api/auth/signout", json={"csrf_token": "x"}).status_code, 401)
+        self.post_new_identity("member@example.org")
+        me = self.client.get("/api/auth/me").json()
+        token = self.client.cookies.get("guardrail_session")
+        self.assertEqual(self.client.post("/api/auth/signout", json={"csrf_token": token}).status_code, 403)
+        self.assertEqual(self.client.post("/api/auth/signout", json={"csrf_token": "wrong"}).status_code, 403)
+        self.assertEqual(self.client.post("/api/auth/signout", json={}).status_code, 422)
+        self.assertEqual(self.client.post("/api/auth/signout",
+                                          json={"csrf_token": me["csrf_token"], "user_id": 1}).status_code, 422)
+        self.assertEqual(self.client.get("/api/auth/me").status_code, 200)    # nothing above signed out
+        response = self.client.post("/api/auth/signout", json={"csrf_token": me["csrf_token"]})
+        self.assertEqual((response.status_code, response.json()), (200, {"login_required": True}))
+        self.assertIn("guardrail_session=", response.headers["set-cookie"])
+        self.assertIsNone(service.get_user(token))                          # revoked on the server too
+        self.client.cookies.set("guardrail_session", token)
+        self.assertEqual(self.client.get("/api/auth/me").status_code, 401)
+
     def test_csrf_rejected_before_verification(self):
         with patch("backend.routers.auth.verify_google_token") as verify:
             response = self.client.post("/api/auth/google", data={

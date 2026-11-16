@@ -12,7 +12,7 @@ from backend.auth.google import verify_google_token
 from backend.auth.dependencies import optional_account, get_authenticated_account
 from backend.auth.service import AccountUnavailable
 from backend.auth.service import change_account
-from backend.auth.schemas import AccountAction
+from backend.auth.schemas import AccountAction, SignOut
 from backend.auth.service import SESSION_TTL, login_with_google, open_signup, revoke_session
 
 router = APIRouter(tags=["auth"])
@@ -51,6 +51,21 @@ def login_page(request: Request):
     html = html.replace("{{WITHDRAW_DISPLAY}}", "block" if user and user["session_scope"] == "full" else "none")
     html = html.replace("{{RESTORE_DISPLAY}}", "block" if user and user["account_status"] == "pending_deletion" else "none")
     return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+
+
+@router.get("/api/auth/config")
+def sign_in_config():
+    """C-19-10 : what the React sign-in page needs, read at run time so the build carries no server value.
+
+    Public (the page asks before sign-in) : the Google OAuth client ID is not a secret (it is in every sign-in page),
+    the sign-in URI and whether the first sign-in creates the account. No secret, no user data.
+    """
+    from fastapi.responses import JSONResponse
+    return JSONResponse({
+        "google_client_id": os.getenv("GOOGLE_CLIENT_ID", "").strip(),
+        "login_uri": os.getenv("GOOGLE_LOGIN_URI", "").strip(),
+        "open_signup": open_signup(),
+    }, headers={"Cache-Control": "no-store"})
 
 
 @router.post("/api/auth/google")
@@ -157,4 +172,25 @@ def logout(request: Request, csrf_token: str = Form(...)):
     response.delete_cookie(COOKIE, path="/", secure=secure_cookie(request),
                            httponly=True, samesite="lax")
     response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@router.post("/api/auth/signout")
+def signout(request: Request, payload: SignOut):
+    """C-19-10 (DM-114 ③ 다) : sign out from the React screen with the per-session CSRF token /api/auth/me returns.
+
+    The form logout above (the old login page) compares the session cookie itself and stays as it is. JSON answer ;
+    the cookie is cleared and the server-side session revoked.
+    """
+    token = request.cookies.get(COOKIE, "")
+    user = optional_account(request)
+    if not token or user is None:
+        raise HTTPException(401, "Login required")
+    if not secrets.compare_digest(user["csrf_token"].encode(), payload.csrf_token.encode()):
+        raise HTTPException(403, "Invalid CSRF token")
+    revoke_session(token)
+    from fastapi.responses import JSONResponse
+    response = JSONResponse({"login_required": True}, headers={"Cache-Control": "no-store"})
+    response.delete_cookie(COOKIE, path="/", secure=secure_cookie(request),
+                           httponly=True, samesite="lax")
     return response

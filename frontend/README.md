@@ -83,16 +83,17 @@ npm.cmd run dev
 | 비교                    | 정상판/교착판 관측 세션의 사용량·결과 비교; 동결 기록의 변경 조건                                       |
 | 통계                    | 현재 조회 세션의 유형·결과 집계; 동결된 차단 비교 결과                                                  |
 | 시스템 구조·사용 가이드 | 기존 `demo_ui.collect`의 구성·스키마 검증된 예시·판정 해석                                              |
-| 로그인·내 계정          | `/api/auth/me`, Google 로그인 POST, 탈퇴·복구·로그아웃                                                  |
+| 로그인·내 계정          | `/api/auth/config`, `/api/auth/me`, Google 로그인 POST, 탈퇴·복구, 로그아웃 `/api/auth/signout`         |
 | 프로젝트                | GET/POST `/api/projects`, 프로젝트별 세션 목록·상세; 생성 시 `/me`의 CSRF 사용                          |
-| 실시간 모니터           | `/api/live/sessions`, `/api/live/sessions/{id}`; 2.5초 조회, 오류 표시·중단·화면 이탈 시 정리           |
+| 실시간 모니터           | `/api/live/sessions`, `/api/live/sessions/{id}`; 2.5초 조회, 오류 표시·중단·화면 이탈 시 정리. 서버에 없으면 (404) "서버 게이트웨이 준비 중" (C-19-9 전) |
 | API 키 관리             | 현재 main에 키 관리 HTTP API가 없음을 표시; 발급·폐기는 아직 불가                                       |
 
 인증·계정 범위에 따라 401/403/503을 구분합니다. 복구 전용 계정은 계정 화면만 열 수 있습니다.
-백엔드의 로그아웃은 `/me`의 CSRF가 아닌 기존 HTML 폼의 토큰을 요구하므로 `/legacy-login` 프록시로 기존 폼 값을 읽어 그대로 제출합니다.
+로그아웃은 `/me`의 CSRF로 `POST /api/auth/signout` 을 부릅니다 (C-19-10, 옛 HTML 폼을 읽던 `/legacy-login` 우회는 없앴습니다).
+Google 클라이언트 ID 는 서버의 `/api/auth/config` 에서 읽습니다. 로컬 개발에서 서버 값이 비면 `VITE_GOOGLE_CLIENT_ID` 를 씁니다.
 토큰은 localStorage·파일·콘솔에 저장하지 않습니다. 탈퇴·복구는 확인 후 중복 제출을 막습니다.
 서버 오류는 기록 미리보기로 자동 전환하지 않습니다. 사용자가 미리보기를 별도로 선택해야 합니다.
-동결된 참고 데이터는 인증된 `/api/frontend/reference`에서 기존 수집기로 읽습니다.
+동결된 참고 데이터는 인증된 `/api/frontend/reference`에서 읽습니다 (로컬은 기존 수집기, 서버는 배포 묶음의 `reference.json`).
 공개 미리보기의 `public/records.json`은 원래 공개 저장소의 정제된 데모 기록입니다.
 
 ## UI 수정 위치
@@ -103,7 +104,7 @@ npm.cmd run dev
 - `src/components.jsx`: 표·타임라인·상태·오류 표시
 - `src/styles.css`: 기존 데모의 색조를 참고한 반응형 스타일
 - `src/api.js`, `src/model.js`: 기존 API 계약과 화면 데이터 변환
-- `vite.config.js`: 로컬 API 프록시, 고정 포트 (리디렉션 주소가 바뀌지 않도록 strictPort)
+- `vite.config.js`: 로컬 API 프록시 (`/api`), 고정 포트 (리디렉션 주소가 바뀌지 않도록 strictPort)
 
 `export_reference.py`로 공개 미리보기 기록을 다시 생성할 수 있습니다.
 Windows 날짜 형식 차이는 수집기를 메모리에 로드할 때만 처리하며 원본 `demo_ui.py`는 수정하지 않습니다.
