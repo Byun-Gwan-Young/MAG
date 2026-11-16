@@ -1,0 +1,31 @@
+# agent-guardrail service gateway (MAG API key -> the project's provider, judged by the proxy ; 127.0.0.1:8050) —
+# systemd unit (C-19-9). Installed as /etc/systemd/system/guardrail-gateway.service by deploy (remote-install.sh).
+# It reads the backend's /etc/guardrail/backend.env : the same DB URL (Unix socket, peer authentication as user guardrail)
+# and the same provider settings (GUARDRAIL_PROVIDER_KMU_URL), so the key check and the upstream allow-list match the
+# screen. The customer's LLM key only passes through ; nothing here holds one.
+# One worker only : the session routes (session key -> inner proxy) live in this process's memory. A restart ends
+# them : a session that was running gets 409 and the agent starts a new one.
+[Unit]
+Description=agent-guardrail service gateway (127.0.0.1:8050)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=guardrail
+Group=guardrail
+WorkingDirectory=/opt/guardrail/app
+EnvironmentFile=/etc/guardrail/backend.env
+ExecStart=/opt/guardrail/venv/bin/python -B -m service.gateway --host 127.0.0.1 --port 8050
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

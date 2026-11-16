@@ -4,7 +4,8 @@
 
 1. `git archive <ref>` of the INCLUDE paths minus the EXCLUDE paths (both lists below) : the query API (service/), the
    storage layer (storage/), the few modules they import, and the small committed demo records the loader and the API
-   read. The proxy, the runner, the batch runner, keys, raw session logs, docs/handoff and venv never go.
+   read. The runner, the batch runner, keys, raw session logs, docs/handoff and venv never go ; the proxy module goes
+   only for the service gateway (C-19-9), which runs it in-process behind the key check.
 2. The screen (C-19-10, DM-111 · DM-114) : the React build `frontend/dist` (made on the PM's computer with `npm ci` and
    `npm run build` ; no Node on the server) goes in as site/ — missing dist stops with "npm run build first", and a dist
    older than the frontend sources, or frontend sources that differ from <ref>, is a problem. From a full
@@ -68,6 +69,29 @@ INCLUDE = (
     'runs/demo/*/scenario.yaml',
     'runs/demo/*/conditions.json',
     'runs/demo/*/record/*.json',
+    # C-19-9 : the service gateway (service/gateway.py) runs the proxy module in-process with its demo configs. These
+    # are its imports and the files the inner proxies read (demo configs, run conditions, the frozen criteria).
+    'proxy.py',
+    'session_store.py',
+    'health.py',
+    'observation_api.py',
+    'experiment_config.py',
+    'conversation_extract.py',
+    'criteria_policy.py',
+    'criteria_freeze.py',
+    'explain_v1.py',
+    'deadlock_policy.py',
+    'deadlock_policy_v01.py',
+    'deadlock_policy_v02.py',
+    'deadlock_policy_v03.py',
+    'progress_signal.py',
+    'progress_signal_v1.py',
+    'progress_signal_v3.py',
+    'demo-conditions.yaml',
+    'guardrail-deadlock-v0.3-kmu.yaml',
+    'guardrail-deadlock-v0.3-kmu-block.yaml',
+    'docs/criteria/deadlock-v0.3.json',
+    'docs/criteria/explain-v1.json',
 )
 # Never on the server (DM-91 ⑤), even if an INCLUDE path would reach it. Checked again on the bundled file list.
 EXCLUDE = (
@@ -85,7 +109,8 @@ EXCLUDE = (
     'runs/*/search/*',
     'runs/*/tool-dispatch.json',
     'runs/*/prompt-trend.json',
-    'proxy.py', 'experiments/run_scenario.py', 'experiments/dialogue_runner.py', 'tools/run_batch.py',
+    # The runners stay on the Mac. C-19-9 : proxy.py goes (the gateway runs it in-process, never as its own server).
+    'experiments/run_scenario.py', 'experiments/dialogue_runner.py', 'tools/run_batch.py',
 )
 MAX_FILE_BYTES = 1024 * 1024
 TEXT_SUFFIXES = {'.py', '.json', '.yaml', '.yml', '.md', '.txt', '.sql', '.sh', '.service', '.template', '.example',

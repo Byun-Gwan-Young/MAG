@@ -113,16 +113,28 @@ class CaddyAndUnit(unittest.TestCase):
 
     def test_only_the_api_paths_go_to_the_api(self):
         self.assertEqual(re.findall(r'^@api path (.+)$', self.code, re.M), ['/api/* /docs /redoc /openapi.json'])
-        self.assertEqual(re.findall(r'reverse_proxy (\S+)', self.code), ['127.0.0.1:8030', '127.0.0.1:8020'])
+        self.assertEqual(re.findall(r'reverse_proxy (\S+)', self.code), ['127.0.0.1:8030', '127.0.0.1:8020',
+                                                                         '127.0.0.1:8050'])
         self.assertIn('handle @api {\nreverse_proxy 127.0.0.1:8020\n}', self.code)
-        for later in ('/v1', '/sessions'):
-            self.assertNotIn(later, self.code)   # C-19-9 blocks are comments only
-            self.assertIn(later, self.caddy)
+
+    def test_gateway_paths_go_to_the_gateway_with_the_long_timeout(self):
+        # C-19-9 : the key-protected gateway paths, before the catch-all screen ; Caddy waits longer than the proxy's
+        # 600 s upstream read ; 8 MB body limit like the gateway's own.
+        self.assertEqual(re.findall(r'^@gateway path (.+)$', self.code, re.M),
+                         ['/v1/* /sessions /sessions/* /log /conditions'])
+        block = self.code[self.code.index('handle @gateway {'):self.code.index('handle /assets/*')]
+        self.assertIn('request_body {\nmax_size 8MB\n}', block)
+        self.assertIn('reverse_proxy 127.0.0.1:8050 {\ntransport http {', block)
+        timeouts = dict(re.findall(r'^(response_header_timeout|read_timeout|write_timeout) (\d+)s$', block, re.M))
+        self.assertEqual(set(timeouts), {'response_header_timeout', 'read_timeout', 'write_timeout'})
+        self.assertTrue(all(int(v) >= 600 for v in timeouts.values()), timeouts)
+        self.assertNotRegex(self.code, r'(?m)^log\b')    # no access log : the key header never lands in a Caddy log
+        self.assertLess(self.code.index('handle @gateway'), self.code.index('handle {\nroot'))
 
     def test_everything_but_sign_in_asks_the_backend_first(self):
         # DM-110 : forward_auth on every path except the sign-in page, the sign-in API and (C-19-10) the built JS · CSS
         # the React sign-in page loads. Data (/records.json, /reference.json, /api/frontend/reference) stays gated.
-        self.assertEqual(re.findall(r'^@gated (.+)$', self.code, re.M), ['not path /login /api/auth/* /assets/*'])
+        self.assertEqual(re.findall(r'^@gated (.+)$', self.code, re.M), ['not path /login /api/auth/* /assets/* /v1/* /sessions /sessions/* /log /conditions'])
         self.assertIn('forward_auth @gated 127.0.0.1:8030 {\nuri /api/auth/check\n}', self.code)
         self.assertLess(self.code.index('forward_auth'), self.code.index('handle @backend'))
 
@@ -130,7 +142,7 @@ class CaddyAndUnit(unittest.TestCase):
         # DM-108 : /api/auth/* and /api/projects* must not fall into the query API's /api/*.
         # C-19-10 : /login is the React screen now, not the backend template.
         self.assertEqual(re.findall(r'^@backend path (.+)$', self.code, re.M),
-                         ['/api/auth/* /api/projects /api/projects/* /api/keys/* /api/providers'])   # C-19-8K revoke, C-19-8P
+                         ['/api/auth/* /api/projects /api/projects/* /api/keys/* /api/providers /api/live/*'])   # C-19-8K, C-19-8P, C-19-9
         self.assertIn('handle @backend {\nreverse_proxy 127.0.0.1:8030\n}', self.code)
         self.assertLess(self.code.index('handle @backend'), self.code.index('handle @api'))
         for header in ('Strict-Transport-Security', 'X-Content-Type-Options', 'X-Frame-Options', 'Referrer-Policy'):
@@ -166,6 +178,19 @@ class CaddyAndUnit(unittest.TestCase):
                      'ExecStart=/opt/guardrail/venv/bin/python -B -m uvicorn backend.main:app --host 127.0.0.1 '
                      '--port 8030 --workers 1'):
             self.assertIn(line + '\n', unit)
+
+    def test_gateway_unit(self):
+        # C-19-9 : loopback, one worker, the backend's env file (same DB URL and provider settings).
+        unit = (AWS / 'guardrail-gateway.service').read_text(encoding='utf-8')
+        for line in ('User=guardrail', 'WorkingDirectory=/opt/guardrail/app', 'EnvironmentFile=/etc/guardrail/backend.env',
+                     'Restart=always', 'ProtectSystem=strict', 'PrivateTmp=true',
+                     'ExecStart=/opt/guardrail/venv/bin/python -B -m service.gateway --host 127.0.0.1 --port 8050'):
+            self.assertIn(line + '\n', unit)
+        install = (AWS / 'remote-install.sh').read_text(encoding='utf-8')
+        self.assertIn('install -m 644 "$release/deploy/aws/guardrail-gateway.service" '
+                      '/etc/systemd/system/guardrail-gateway.service', install)
+        self.assertIn('systemctl restart guardrail-gateway', install)
+        self.assertIn('curl -fsS -o /dev/null http://127.0.0.1:8050/healthz ||', install)
 
     def test_server_db_url_is_a_socket_without_password(self):
         url = 'postgresql:///guardrail_demo?host=/var/run/postgresql'
@@ -429,7 +454,7 @@ class Bundle(unittest.TestCase):
 
     def test_exclusion_list_names_what_must_not_go(self):
         for pattern in ('logs/*', 'docs/handoff/*', '.env', '.env.*', '*.pem', 'venv/*', 'deploy/aws/target.env',
-                        'runs/*/session.json', 'proxy.py', 'experiments/run_scenario.py', 'tools/run_batch.py'):
+                        'runs/*/session.json', 'experiments/run_scenario.py', 'tools/run_batch.py'):
             self.assertIn(pattern, bundle.EXCLUDE)
         self.assertIn(':(exclude)logs/*', bundle.pathspecs())
 
@@ -447,13 +472,15 @@ class Bundle(unittest.TestCase):
             self.assertFalse(path.startswith(('logs/', 'docs/handoff', 'venv/', '.env')), path)
             self.assertNotRegex(path, r'(session|steps)\.json$|\.pem$|target\.env$')
             self.assertLessEqual(len(self.files[path]), bundle.MAX_FILE_BYTES, path)
-        for absent in ('proxy.py', 'experiments/run_scenario.py', 'tools/run_batch.py', 'requirements.txt',
+        for absent in ('experiments/run_scenario.py', 'tools/run_batch.py', 'requirements.txt',
                        'backend/test_auth.py'):
             self.assertNotIn(absent, paths)
         for present in ('site/index.html', 'DEPLOY_INFO.json', 'service/api.py', 'storage/__main__.py',
                         'service/requirements-server.txt', 'deploy/aws/remote-install.sh', 'scenarios/README.md',
                         'reports/c19/aggregate-main.json', 'docs/criteria/demo-final-freeze.json',
-                        'backend/main.py', 'backend/templates/login.html', 'deploy/aws/guardrail-backend.service'):
+                        'backend/main.py', 'backend/templates/login.html', 'deploy/aws/guardrail-backend.service',
+                        'service/gateway.py', 'proxy.py', 'deploy/aws/guardrail-gateway.service',
+                        'guardrail-deadlock-v0.3-kmu-block.yaml', 'demo-conditions.yaml'):
             self.assertIn(present, paths)
         self.assertEqual(len([p for p in paths if p.endswith('/record/replay.json')]), 115)
         # C-19-10 : site/ is the React build ; the frozen reference beside it ; the old screen under /legacy/.
@@ -466,6 +493,48 @@ class Bundle(unittest.TestCase):
         self.assertNotIn('frontend/src/App.jsx', paths)      # sources stay on the PM's computer
         listing = (Path(self.tmp.name) / 'out' / 'bundle-files.txt').read_text(encoding='utf-8').splitlines()
         self.assertEqual(len(listing), len(paths))
+
+    def test_the_bundle_alone_runs_the_gateway(self):
+        # C-19-9 : the bundled files (nothing else of this repository on the path) start the gateway and judge one
+        # block-mode turn against a fake upstream ; the key check and the DB are stand-ins.
+        script = '''
+import asyncio, json, os, sys
+from unittest import mock
+import httpx
+from service import gateway
+from storage import accounts as real_accounts
+def leaked():
+    files = [getattr(m, '__file__', None) or '' for m in list(sys.modules.values())]
+    return [f for f in files if f.startswith(sys.argv[2]) and not f.startswith(sys.argv[2] + 'venv' + os.sep)]
+assert not leaked(), leaked()
+project = {'id': 5, 'mode': 'block', 'read_only': False, 'name': 'p', 'upstream_url': os.environ['GUARDRAIL_PROVIDER_KMU_URL']}
+accounts = mock.Mock(verify_api_key=lambda raw: project if raw == 'gk_bundle00_x' else None,
+                     allowed_upstreams=real_accounts.allowed_upstreams)
+live = mock.Mock()
+live.get_session_progress.side_effect = LookupError
+reply = {'choices': [{'message': {'content': 'ok'}}], 'usage': {'prompt_tokens': 1, 'completion_tokens': 1, 'total_tokens': 2}}
+upstream = httpx.MockTransport(lambda request: httpx.Response(200, json=reply))
+async def main():
+    app = gateway.create_app(accounts=accounts, live=live, transport=upstream)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='https://mag.test') as client:
+        body = {'model': gateway.demo_model(), 'messages': [{'role': 'user', 'content': 'hi'}]}
+        no_key = await client.post('/v1/chat/completions', json=body)
+        ok = await client.post('/v1/chat/completions', json=body,
+                               headers={'X-Guardrail-Key': 'gk_bundle00_x', 'X-Guardrail-Session': 'bundle-1'})
+        print(json.dumps([no_key.status_code, ok.status_code, live.add_llm_call.call_count]))
+asyncio.run(main())
+assert not leaked(), leaked()
+'''
+        with tempfile.TemporaryDirectory() as tmp:
+            for path, body in self.files.items():
+                (Path(tmp) / path).parent.mkdir(parents=True, exist_ok=True)
+                (Path(tmp) / path).write_bytes(body)
+            env = {k: v for k, v in os.environ.items() if not k.startswith(('PYTHON', 'GUARDRAIL_'))}
+            env.update(PYTHONPATH=tmp, GUARDRAIL_PROVIDER_KMU_URL='https://kmu-gateway.example/v1/gateway')
+            result = subprocess.run([sys.executable, '-B', '-c', script, tmp, str(ROOT) + os.sep], cwd=tmp, env=env,
+                                    capture_output=True, text=True, timeout=120)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        self.assertEqual(json.loads(result.stdout.strip().splitlines()[-1]), [401, 200, 1])
 
     def test_check_catches_what_must_not_go(self):
         self.assertTrue(bundle.check({'logs/A-1-x.json': b'{}'}))

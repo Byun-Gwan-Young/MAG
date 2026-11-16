@@ -3,6 +3,7 @@
 # the ones of this repository's venv (requirements.txt) ; psycopg[binary] as in storage/requirements-storage.txt.
 # DM-108 : the service backend (backend/, Google sign-in) adds google-auth with its requests transport and
 # python-multipart (the sign-in form post).
+# C-19-9 : the service gateway (service/gateway.py, the proxy module in-process) adds httpx and httpcore.
 fastapi==0.141.1
 starlette==1.6.0
 pydantic==2.13.5
@@ -30,3 +31,5 @@ urllib3==2.7.0
 certifi==2026.7.22
 charset-normalizer==3.5.1
 python-multipart==0.0.32
+httpx==0.28.1
+httpcore==1.0.9

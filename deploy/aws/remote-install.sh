@@ -14,6 +14,8 @@
 #    sign-in URI on DOMAIN, secure cookie, and GOOGLE_CLIENT_ID when given ; an empty argument keeps the one already
 #    on the server), its unit, restart, and wait for /login. Without a client ID the page says it is not set up yet.
 #    C-19-8K : also GUARDRAIL_DEFAULT_PROVIDER (kmu) and GUARDRAIL_PROVIDER_KMU_URL ; values already there are kept.
+# 5. C-19-9 : the service gateway (service/gateway.py) on 127.0.0.1:8050, reading the same backend.env : its unit,
+#    restart, and wait for /healthz. Caddy sends /v1/*, /sessions*, /log and /conditions to it.
 set -euo pipefail
 
 BUNDLE=${1:-}
@@ -102,6 +104,13 @@ systemctl enable guardrail-backend >/dev/null 2>&1
 systemctl restart guardrail-backend
 [[ -n "$CLIENT_ID" ]] || printf '주의 : 구글 클라이언트 ID 가 없다. 로그인 화면은 열리지만 로그인 버튼이 나오지 않는다\n'
 
+step "서비스 게이트웨이 (MAG API 키, 127.0.0.1:8050) : 유닛 · 재시작 (C-19-9)"
+# The same backend.env (DB URL, provider settings) : the key check and the upstream allow-list match the screen.
+install -m 644 "$release/deploy/aws/guardrail-gateway.service" /etc/systemd/system/guardrail-gateway.service
+systemctl daemon-reload
+systemctl enable guardrail-gateway >/dev/null 2>&1
+systemctl restart guardrail-gateway
+
 step "Caddy : 도메인 → caddy.env, Caddyfile 설치, 확인, 다시 읽기"
 tmp=$(umask 077 && mktemp "$CADDY_ENV.XXXXXX")
 # DM-109 : the old shared-password lines (GUARDRAIL_BASIC_AUTH_*) are dropped with the basic auth block.
@@ -132,6 +141,16 @@ for _ in $(seq 1 20); do
     sleep 1
 done
 curl -fsS -o /dev/null http://127.0.0.1:8030/login || { journalctl -u guardrail-backend -n 30 --no-pager >&2; die "백엔드가 응답하지 않는다 (사이트 · API 는 새 릴리스로 바뀌었다)"; }
+
+step "게이트웨이 응답 (127.0.0.1:8050/healthz)"
+for _ in $(seq 1 20); do
+    if curl -fsS -o /dev/null http://127.0.0.1:8050/healthz; then
+        printf '게이트웨이 응답 확인\n'
+        break
+    fi
+    sleep 1
+done
+curl -fsS -o /dev/null http://127.0.0.1:8050/healthz || { journalctl -u guardrail-gateway -n 30 --no-pager >&2; die "게이트웨이가 응답하지 않는다 (사이트 · API · 백엔드는 새 릴리스로 바뀌었다)"; }
 
 step "옛 릴리스 정리 (최근 3 개 남김)"
 ls -1dt /opt/guardrail/releases/*/ | tail -n +4 | while read -r old; do

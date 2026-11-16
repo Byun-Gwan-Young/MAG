@@ -21,14 +21,16 @@
 	# --- DM-110 : sign-in first. Every request except the sign-in page, the sign-in API and the built JS · CSS
 	# (/assets/*, which the sign-in page itself needs ; no data in them) asks the backend ; no active session = the
 	# backend's 303 to /login goes back to the browser. forward_auth runs before the handle blocks. ---
-	@gated not path /login /api/auth/* /assets/*
+	# C-19-9 : the service gateway paths (below) are protected by the MAG API key the gateway itself checks, not by sign-in.
+	@gated not path /login /api/auth/* /assets/* /v1/* /sessions /sessions/* /log /conditions
 	forward_auth @gated 127.0.0.1:8030 {
 		uri /api/auth/check
 	}
 
 	# --- service backend (DM-108, 127.0.0.1:8030) : sign-in API, the user's projects, their keys (C-19-8K), the provider list (C-19-8P) ---
 	# Before @api : /api/auth/*, /api/projects*, /api/keys/* and /api/providers would otherwise fall into /api/*.
-	@backend path /api/auth/* /api/projects /api/projects/* /api/keys/* /api/providers
+	# C-19-9 : /api/live/* is the live dashboard (the user's gateway sessions from the DB).
+	@backend path /api/auth/* /api/projects /api/projects/* /api/keys/* /api/providers /api/live/*
 	handle @backend {
 		reverse_proxy 127.0.0.1:8030
 	}
@@ -47,7 +49,25 @@
 		reverse_proxy 127.0.0.1:8020
 	}
 
-	# --- C-19-9 : /v1/* and /sessions/* (service gateway, key-protected) blocks go here. Not open now. ---
+	# --- C-19-9 : service gateway (service/gateway.py, 127.0.0.1:8050). The customer's agent calls /v1/chat/completions
+	# with its MAG API key (X-Guardrail-Key) ; the runner also uses /sessions*, /log and /conditions. No sign-in here :
+	# the gateway answers 401 without a valid key. One model turn can take minutes (the proxy waits up to 600 s for
+	# the upstream), so Caddy waits 660 s. Bodies over 8 MB are refused (the gateway's own limit is the same).
+	# No access log is configured for this site : the key header never reaches a Caddy log. ---
+	@gateway path /v1/* /sessions /sessions/* /log /conditions
+	handle @gateway {
+		request_body {
+			max_size 8MB
+		}
+		reverse_proxy 127.0.0.1:8050 {
+			transport http {
+				dial_timeout 10s
+				response_header_timeout 660s
+				read_timeout 660s
+				write_timeout 660s
+			}
+		}
+	}
 
 	# --- React screen (static files, built on the PM's computer). Hashed JS · CSS are cached ; a missing one is a 404,
 	# never the page. Everything else : the file if there is one, else index.html (single-page app), never cached
