@@ -33,7 +33,8 @@ while (( $# )); do
 done
 
 PYTHON="$REPO/venv/bin/python"
-[[ -x "$PYTHON" ]] || die "venv/bin/python 이 없다"
+[[ -x "$PYTHON" ]] || PYTHON="$REPO/venv/Scripts/python.exe"   # C-19-10 : Windows venv (Git Bash)
+[[ -x "$PYTHON" ]] || die "venv/bin/python (Windows : venv/Scripts/python.exe) 이 없다"
 [[ -n "$BUNDLE_ONLY" ]] || load_target "$SCRIPT_DIR/target.env"
 
 if [[ -n "$BUNDLE_ONLY" ]]; then
