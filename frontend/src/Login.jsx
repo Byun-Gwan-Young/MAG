@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, ShieldCheck } from "lucide-react";
+import { ArrowRight } from "lucide-react";
+import logo from "./assets/logo.svg";
 import { request } from "./api.js";
 
 // C-19-10: the server tells the sign-in page its Google client ID at run time
@@ -68,7 +69,9 @@ export default function Login() {
     <div className="login-layout">
       <section className="login-story">
         <div className="brand">
-          <ShieldCheck size={32} />
+          <span className="brand-icon">
+            <img src={logo} alt="" />
+          </span>
           agent guardrail
         </div>
         <div>
@@ -96,7 +99,7 @@ export default function Login() {
       <section className="login-form">
         <div className="login-card">
           <span className="brand-icon">
-            <ShieldCheck size={26} />
+            <img src={logo} alt="" />
           </span>
           <p className="eyebrow">WELCOME BACK</p>
           <h2>실험 워크스페이스에 로그인</h2>

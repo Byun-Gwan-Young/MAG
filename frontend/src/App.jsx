@@ -34,6 +34,7 @@ import {
   KeysPage,
 } from "./pages.jsx";
 import Login from "./Login.jsx";
+import logo from "./assets/logo.svg";
 
 const navigation = [
   ["dashboard", "대시보드", LayoutDashboard],
@@ -116,7 +117,7 @@ export default function App() {
       <aside className={`sidebar ${mobile ? "expanded" : ""}`}>
         <a className="brand" href="#dashboard">
           <span className="brand-icon">
-            <ShieldCheck size={24} />
+            <img src={logo} alt="" />
           </span>
           <div>
             agent<span>guardrail</span>
