@@ -72,7 +72,10 @@ export default function Login() {
           <span className="brand-icon">
             <img src={logo} alt="" />
           </span>
-          agent guardrail
+          <div>
+            MAG
+            <small>Multi-Agent Guardrail</small>
+          </div>
         </div>
         <div>
           <p className="eyebrow">OBSERVE. UNDERSTAND. IMPROVE.</p>
@@ -94,7 +97,7 @@ export default function Login() {
             <span>03 기록</span>
           </div>
         </div>
-        <small>CAPSTONE · MULTI-AGENT EXPERIMENT CONSOLE</small>
+        <small>CAPSTONE · MAG · MULTI-AGENT GUARDRAIL</small>
       </section>
       <section className="login-form">
         <div className="login-card">

@@ -83,7 +83,7 @@ export default function App() {
     return (
       <div className="auth-shell">
         <ShieldCheck size={38} />
-        <h1>Agent Guardrail</h1>
+        <h1>MAG</h1>
         <ErrorBox error={auth.error} retry={auth.retry} />
         <p>
           <a href="/?preview=1">저장된 데모 화면 살펴보기</a>
@@ -120,8 +120,8 @@ export default function App() {
             <img src={logo} alt="" />
           </span>
           <div>
-            agent<span>guardrail</span>
-            <small>EXPERIMENT CONSOLE</small>
+            MAG
+            <small>Multi-Agent Guardrail</small>
           </div>
         </a>
         <div className="workspace">
@@ -188,7 +188,7 @@ export default function App() {
           <div className="page-heading">
             <div>
               <p className="eyebrow">
-                AGENT GUARDRAIL / {current.page.toUpperCase()}
+                MAG / {current.page.toUpperCase()}
               </p>
               <h1>{title}</h1>
               <p>멀티에이전트 실험의 진행과 판정 근거를 함께 살펴보세요.</p>
@@ -219,7 +219,7 @@ export default function App() {
           )}
         </main>
         <footer>
-          <span>Agent Guardrail · 캡스톤 실험</span>
+          <span>MAG · Multi-Agent Guardrail · 캡스톤 실험</span>
           <span>
             교착 판정은 자동 규칙의 결과입니다. 작업·테스트 근거를 함께
             검토하세요.

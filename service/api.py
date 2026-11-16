@@ -37,7 +37,7 @@ def guarded(payload):
 
 
 def create_app(store):
-    app = FastAPI(title='agent-guardrail demo records API', version=API_VERSION,
+    app = FastAPI(title='MAG demo records API (Multi-Agent Guardrail)', version=API_VERSION,
                   description='데모 기록 조회 (읽기 전용). 데모 세션 기준 · 유도한 교착 (DM-2·DM-5). '
                               'C-19-6, DM-89. 쓰기 엔드포인트 없음.')
 
