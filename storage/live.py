@@ -266,6 +266,47 @@ def _live_start_result(existing):
     }
 
 
+LIVE_SCENARIO_SCHEMA_VERSION = "live-gateway-v1"
+
+
+def ensure_live_scenario(project_id, scenario_key, scenario_hash, name, config):
+    """C-19-9 : register (or find) the scenario identity a gateway session starts under.
+
+    ``start_live_session`` needs an exact (project, scenario_key, scenario_hash)
+    row (README "Live scenario identity").  The service gateway builds that
+    identity from what the caller declared (``X-Guardrail-Scenario`` and the
+    session registration) and registers it here before the session starts.
+    The row is written by the existing importer upsert (``import_utils.
+    upsert_scenario``) : no new SQL.  Read-only / missing projects are refused
+    exactly as for live sessions.  Returns the scenario id.
+    """
+
+    from storage.import_utils import upsert_scenario
+
+    scenario_key = _validate_nonempty(scenario_key, "scenario_key")
+    scenario_hash = _validate_nonempty(scenario_hash, "scenario_hash")
+    name = _validate_nonempty(name, "name")
+    if len(scenario_key) > 100:
+        raise ValueError("scenario_key must be at most 100 characters")
+    if not isinstance(config, dict):
+        raise ValueError("config must be a dict")
+    assert_no_secrets(scenario_key, "scenario_key")
+    assert_no_secrets(name, "name")
+    assert_safe_storage_json(config, "config")
+
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            _require_writable_project(cursor, project_id, lock=False)
+            return upsert_scenario(cursor, project_id, {
+                "scenario_key": scenario_key,
+                "scenario_hash": scenario_hash,
+                "schema_version": LIVE_SCENARIO_SCHEMA_VERSION,
+                "name": name,
+                "task_kind": None,
+                "config": config,
+            })
+
+
 def start_live_session(
     project_id,
     session_id,

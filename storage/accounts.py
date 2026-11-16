@@ -284,6 +284,22 @@ def list_providers() -> list[dict]:
     ]
 
 
+def allowed_upstreams() -> dict[str, str]:
+    """C-19-9 : the service gateway's upstream allow-list, {address: provider id}.
+
+    Exactly the addresses a project may hold for a listed provider that is
+    available now (the fixed table, and kmu only when the server has its
+    address).  The gateway forwards a project's request only when the project's
+    stored address is a key here; anything else (a custom address, or a kmu
+    address the server no longer has) is refused.  No SQL, no secrets.
+    """
+    allowed = {}
+    for pid, _, _, _ in _PROVIDER_TABLE:
+        if provider_available(pid):
+            allowed[_resolve_provider_upstream(pid)[1]] = pid
+    return allowed
+
+
 def _resolve_selectable_provider(provider) -> tuple[str, str]:
     """Resolve a provider a caller picked from the list (never 'custom')."""
     if not isinstance(provider, str) or not provider.strip():
