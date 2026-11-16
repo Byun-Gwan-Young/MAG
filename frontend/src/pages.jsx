@@ -835,7 +835,7 @@ export function Guide({ data, open }) {
   const steps = [
     [
       "프로젝트 만들기",
-      "프로젝트 메뉴에서 이름과 관측·차단 모드를 선택하세요. 본인 소유의 프로젝트만 조회됩니다.",
+      "프로젝트 메뉴에서 이름, 관측·차단 모드와 LLM 제공자를 선택하세요. 본인 소유의 프로젝트만 조회됩니다.",
     ],
     [
       "API 키 발급",
@@ -845,7 +845,7 @@ export function Guide({ data, open }) {
     ],
     [
       "모델 호출 주소 연결",
-      `프록시 주소와 ${data.system.session_header} 헤더를 실행기에 설정합니다. 이 화면에서 실행기를 시작하지 않습니다.`,
+      `프록시 주소와 ${data.system.session_header} 헤더를 실행기에 설정합니다. LLM 키는 프로젝트에서 고른 제공자의 키를 그대로 Authorization 헤더에 넣으세요 — MAG 는 그 키를 저장하지 않고 전달만 합니다. 이 화면에서 실행기를 시작하지 않습니다.`,
       "서버 게이트웨이 준비 중",
     ],
     [
@@ -1008,14 +1008,60 @@ export function LivePage({ preview }) {
   );
 }
 
+// C-19-8P: provider groups in the order the picker shows them.
+const PROVIDER_GROUPS = [
+  ["global", "해외"],
+  ["korea", "국내"],
+  ["team", "팀 데모"],
+];
+const DEFAULT_PROVIDER = "openai";
+
+function ProviderSelect({ providers, value, onChange, label: text, disabled }) {
+  return (
+    <label>
+      {text}
+      <select
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        {PROVIDER_GROUPS.map(([group, title]) => {
+          const items = providers.filter((p) => p.group === group);
+          return items.length ? (
+            <optgroup key={group} label={title}>
+              {items.map((p) => (
+                <option key={p.id} value={p.id} disabled={!p.available}>
+                  {p.available
+                    ? p.name
+                    : `${p.name} — 이 서버에서 사용할 수 없음`}
+                </option>
+              ))}
+            </optgroup>
+          ) : null;
+        })}
+      </select>
+    </label>
+  );
+}
+
 export function Projects({ user, preview }) {
   const projects = useResource(
     (signal) =>
       preview ? Promise.resolve([]) : request("/api/projects", { signal }),
     [preview],
   );
+  // C-19-8P: provider choices (ids, names, availability; never an address).
+  const providers = useResource(
+    (signal) =>
+      preview ? Promise.resolve([]) : request("/api/providers", { signal }),
+    [preview],
+  );
+  const providerList = providers.data || [];
+  const providerName = (id) =>
+    providerList.find((p) => p.id === id)?.name || id || "—";
   const [name, setName] = useState("");
   const [mode, setMode] = useState("observe");
+  const [provider, setProvider] = useState(DEFAULT_PROVIDER);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [selected, setSelected] = useState(null);
@@ -1039,6 +1085,7 @@ export function Projects({ user, preview }) {
       await post("/api/projects", {
         name: name.trim(),
         mode,
+        provider,
         csrf_token: user.csrf_token,
       });
       setName("");
@@ -1053,6 +1100,7 @@ export function Projects({ user, preview }) {
     setSelected(id);
     setOffset(0);
     setDetail(null);
+    setNextProvider(null);
   };
   // C-19-8K: change the selected project's mode (observe · block).
   const [modeBusy, setModeBusy] = useState(false);
@@ -1069,6 +1117,25 @@ export function Projects({ user, preview }) {
       setError(e);
     } finally {
       setModeBusy(false);
+    }
+  };
+  // C-19-8P: change the selected project's LLM provider.
+  const [nextProvider, setNextProvider] = useState(null);
+  const [providerBusy, setProviderBusy] = useState(false);
+  const changeProvider = async () => {
+    setProviderBusy(true);
+    setError(null);
+    try {
+      await patch(`/api/projects/${selected}`, {
+        provider: nextProvider,
+        csrf_token: user.csrf_token,
+      });
+      setNextProvider(null);
+      projects.retry();
+    } catch (e) {
+      setError(e);
+    } finally {
+      setProviderBusy(false);
     }
   };
   const current = projects.data?.find((p) => p.id === selected);
@@ -1118,7 +1185,7 @@ export function Projects({ user, preview }) {
                   <span>
                     <b>{p.name}</b>
                     <small>
-                      {label(p.mode)} · {p.rule_id}
+                      {label(p.mode)} · {providerName(p.provider)} · {p.rule_id}
                     </small>
                   </span>
                   <ChevronRight size={17} />
@@ -1151,7 +1218,29 @@ export function Projects({ user, preview }) {
                 <option value="block">차단</option>
               </select>
             </label>
-            <button className="primary" disabled={busy || !name.trim()}>
+            {providers.error ? (
+              <ErrorBox error={providers.error} retry={providers.retry} />
+            ) : (
+              <ProviderSelect
+                label="LLM 제공자"
+                providers={providerList}
+                value={provider}
+                onChange={setProvider}
+                disabled={providers.loading}
+              />
+            )}
+            <p className="muted form-note">
+              고객 요청을 넘겨줄 곳입니다. 판정은 LLM 을 쓰지 않습니다. LLM 키는
+              MAG 에 저장하지 않고 요청마다 그대로 전달합니다.
+            </p>
+            <button
+              className="primary"
+              disabled={
+                busy ||
+                !name.trim() ||
+                !providerList.find((p) => p.id === provider)?.available
+              }
+            >
               <Plus size={16} />
               {busy ? "생성 중…" : "프로젝트 만들기"}
             </button>
@@ -1184,6 +1273,34 @@ export function Projects({ user, preview }) {
                 <small>{text}</small>
               </button>
             ))}
+          </div>
+        </Panel>
+      )}
+      {current && (
+        <Panel
+          title="LLM 제공자"
+          subtitle={`${current.name} · 지금 ${providerName(current.provider)} 로 요청을 넘깁니다.`}
+        >
+          <div className="form provider-form">
+            <ProviderSelect
+              label="바꿀 제공자"
+              providers={providerList}
+              value={nextProvider ?? current.provider ?? DEFAULT_PROVIDER}
+              onChange={setNextProvider}
+              disabled={providerBusy || providers.loading}
+            />
+            <button
+              className="primary"
+              disabled={
+                providerBusy ||
+                !nextProvider ||
+                nextProvider === current.provider ||
+                !providerList.find((p) => p.id === nextProvider)?.available
+              }
+              onClick={changeProvider}
+            >
+              {providerBusy ? "저장 중…" : "제공자 저장"}
+            </button>
           </div>
         </Panel>
       )}

@@ -11,6 +11,31 @@ const user = {
   session_scope: "full",
   csrf_token: "test-only-csrf",
 };
+// C-19-8P: what GET /api/providers returns (ids, names, groups, availability; never an address).
+const providers = [
+  { id: "openai", name: "OpenAI (GPT)", group: "global", available: true },
+  {
+    id: "anthropic",
+    name: "Anthropic (Claude)",
+    group: "global",
+    available: true,
+  },
+  { id: "gemini", name: "Google (Gemini)", group: "global", available: true },
+  { id: "groq", name: "Groq", group: "global", available: true },
+  { id: "upstage", name: "Upstage (Solar)", group: "korea", available: true },
+  {
+    id: "clova",
+    name: "네이버 (HyperCLOVA X)",
+    group: "korea",
+    available: true,
+  },
+  {
+    id: "kmu",
+    name: "학교 게이트웨이 (팀 데모)",
+    group: "team",
+    available: false,
+  },
+];
 
 test("preview navigation, combined filters, replay, comparison and responsive layout", async ({
   page,
@@ -170,6 +195,7 @@ test("authenticated API, project create with CSRF, API failure and polling clean
         session: { scenario: { korean_name: s.name, title: s.title } },
       });
     }
+    if (path === "/api/providers") return respond(providers);
     if (path === "/api/projects" && req.method() === "POST") {
       calls.push(req.postDataJSON());
       created = true;
@@ -233,7 +259,12 @@ test("authenticated API, project create with CSRF, API failure and polling clean
     .click();
   await expect(page.getByRole("button", { name: /로컬 실험/ })).toBeVisible();
   expect(calls).toEqual([
-    { name: "로컬 실험", mode: "observe", csrf_token: user.csrf_token },
+    {
+      name: "로컬 실험",
+      mode: "observe",
+      provider: "openai",
+      csrf_token: user.csrf_token,
+    },
   ]);
   await page.getByRole("button", { name: /로컬 실험/ }).click();
   await page
@@ -348,6 +379,7 @@ test("C-19-8K: key issue shows the raw key once, list, revoke, project mode, gui
       });
     if (path === "/api/auth/me") return respond(user);
     if (path === "/api/frontend/reference") return respond(data);
+    if (path === "/api/providers") return respond(providers);
     if (path === "/api/projects")
       return respond([
         { id: 5, name: "키 실험", mode, rule_id: "deadlock-v0.3" },
@@ -442,4 +474,90 @@ test("C-19-8K: key issue shows the raw key once, list, revoke, project mode, gui
   await expect(page.getByText("API 키 관리 HTTP API가 없습니다")).toHaveCount(
     0,
   );
+});
+
+test("C-19-8P: pick the LLM provider on create, see it in the list, change it", async ({
+  page,
+}) => {
+  const writes = [];
+  let list = [];
+  await page.route("**/api/**", async (route) => {
+    const req = route.request();
+    const path = new URL(req.url()).pathname;
+    const respond = (body, status = 200) =>
+      route.fulfill({
+        status,
+        contentType: "application/json",
+        body: JSON.stringify(body),
+      });
+    if (path === "/api/auth/me") return respond(user);
+    if (path === "/api/frontend/reference") return respond(data);
+    if (path === "/api/providers") return respond(providers);
+    if (path === "/api/projects" && req.method() === "POST") {
+      const body = req.postDataJSON();
+      writes.push([path, body]);
+      const project = {
+        id: 7,
+        name: body.name,
+        mode: body.mode,
+        provider: body.provider,
+        rule_id: "deadlock-v0.3",
+      };
+      list = [project];
+      return respond(project, 201);
+    }
+    if (path === "/api/projects") return respond(list);
+    if (path === "/api/projects/7" && req.method() === "PATCH") {
+      const body = req.postDataJSON();
+      writes.push([path, body]);
+      list = [{ ...list[0], provider: body.provider }];
+      return respond(list[0]);
+    }
+    if (path === "/api/projects/7/sessions")
+      return respond({ items: [], total: 0, offset: 0, limit: 20 });
+    return respond({ detail: "Not found" }, 404);
+  });
+  await page.goto("/#projects");
+  const picker = page.getByLabel("LLM 제공자");
+  await expect(picker).toHaveValue("openai");
+  await expect(picker.locator("optgroup")).toHaveCount(3);
+  expect(
+    await picker.locator("optgroup").evaluateAll((g) => g.map((x) => x.label)),
+  ).toEqual(["해외", "국내", "팀 데모"]);
+  await expect(picker.locator('option[value="kmu"]')).toBeDisabled();
+  await picker.selectOption("anthropic");
+  await page.getByLabel("프로젝트 이름").fill("제공자 실험");
+  await page
+    .getByRole("button", { name: "프로젝트 만들기", exact: true })
+    .click();
+  const item = page.getByRole("button", { name: /제공자 실험/ });
+  await expect(item).toContainText("Anthropic (Claude)");
+  await item.click();
+  const change = page.getByLabel("바꿀 제공자");
+  await expect(change).toHaveValue("anthropic");
+  const save = page.getByRole("button", { name: "제공자 저장", exact: true });
+  await expect(save).toBeDisabled();
+  await change.selectOption("upstage");
+  await save.click();
+  await expect(page.getByRole("button", { name: /제공자 실험/ })).toContainText(
+    "Upstage (Solar)",
+  );
+  expect(writes).toEqual([
+    [
+      "/api/projects",
+      {
+        name: "제공자 실험",
+        mode: "observe",
+        provider: "anthropic",
+        csrf_token: user.csrf_token,
+      },
+    ],
+    ["/api/projects/7", { provider: "upstage", csrf_token: user.csrf_token }],
+  ]);
+  const html = await page.content();
+  expect(html).not.toContain("https://api.");
+  await page.goto("/?preview=1#guide");
+  await expect(
+    page.getByText("MAG 는 그 키를 저장하지 않고 전달만", { exact: false }),
+  ).toBeVisible();
 });

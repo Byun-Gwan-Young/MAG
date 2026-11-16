@@ -1772,3 +1772,12 @@ footer {
     transition: none !important;
   }
 }
+/* C-19-8P: the provider picker note and the provider setting panel. Theme variables only. */
+.form-note {
+  margin: -8px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.provider-form {
+  padding-top: 2px;
+}
