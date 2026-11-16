@@ -831,7 +831,13 @@ export function SystemPage({ data }) {
   );
 }
 
+// C-19-9: the service gateway on this site's own address (Caddy routes /v1/* and /sessions/* to it).
+const GATEWAY_KEY_HEADER = "X-Guardrail-Key";
+const siteOrigin = () =>
+  typeof location === "undefined" ? "https://mag.ai.kr" : location.origin;
+
 export function Guide({ data, open }) {
+  const origin = siteOrigin();
   const steps = [
     [
       "프로젝트 만들기",
@@ -845,12 +851,13 @@ export function Guide({ data, open }) {
     ],
     [
       "모델 호출 주소 연결",
-      `프록시 주소와 ${data.system.session_header} 헤더를 실행기에 설정합니다. LLM 키는 프로젝트에서 고른 제공자의 키를 그대로 Authorization 헤더에 넣으세요 — MAG 는 그 키를 저장하지 않고 전달만 합니다. 이 화면에서 실행기를 시작하지 않습니다.`,
-      "서버 게이트웨이 준비 중",
+      `에이전트의 OpenAI 호환 base_url 을 ${origin}/v1 로 바꾸고, 요청마다 ${GATEWAY_KEY_HEADER} 헤더에 발급받은 MAG 키를, ${data.system.session_header} 헤더에 세션 이름을 넣습니다. LLM 키는 프로젝트에서 고른 제공자의 키를 그대로 Authorization 헤더에 넣으세요 — MAG 는 그 키를 저장하지 않고 전달만 합니다. 이 화면에서 실행기를 시작하지 않습니다.`,
     ],
     [
       "작업 근거 전송",
-      `실행기가 단계마다 ${data.system.observation_route}로 테스트와 구조화 보고를 보냅니다.`,
+      `실행기가 단계마다 ${origin}${data.system.observation_route} 로 테스트와 구조화 보고를 보냅니다 (같은 ${GATEWAY_KEY_HEADER} · ${data.system.session_header} 헤더). 판정과 STOP 원인 문장은 실시간 모니터에 바로 쌓입니다.`,
+      null,
+      "#live",
     ],
     [
       "기록과 판정 확인",
@@ -912,13 +919,12 @@ export function Guide({ data, open }) {
 export function LivePage({ preview }) {
   const [rows, setRows] = useState([]);
   const [error, setError] = useState(null);
-  const [pending, setPending] = useState(false);
   const [updated, setUpdated] = useState(null);
   const [selected, setSelected] = useState(null);
   const [detail, setDetail] = useState(null);
   const [paused, setPaused] = useState(false);
   useEffect(() => {
-    if (preview || paused || pending) return;
+    if (preview || paused) return;
     let active = true;
     const controller = new AbortController();
     let timer;
@@ -940,12 +946,6 @@ export function LivePage({ preview }) {
           setError(null);
         }
       } catch (e) {
-        // C-19-10: the server has no live API until the service gateway (C-19-9).
-        if (active && e.status === 404 && !selected) {
-          active = false;
-          setPending(true);
-          return;
-        }
         if (active) setError(e);
       } finally {
         if (active) timer = setTimeout(poll, 2500);
@@ -957,7 +957,7 @@ export function LivePage({ preview }) {
       controller.abort();
       clearTimeout(timer);
     };
-  }, [preview, selected, paused, pending]);
+  }, [preview, selected, paused]);
   if (preview)
     return (
       <Panel title="실시간 모니터">
@@ -966,27 +966,11 @@ export function LivePage({ preview }) {
         </Empty>
       </Panel>
     );
-  if (pending)
-    return (
-      <Panel title="실시간 모니터">
-        <div className="feature-pending">
-          <span className="feature-icon">
-            <Activity size={32} />
-          </span>
-          <span className="badge">서버 게이트웨이 준비 중</span>
-          <h3>실시간 조회는 서비스 게이트웨이와 함께 열립니다</h3>
-          <p>
-            이 서버에는 아직 실시간 실행 기록 API가 없습니다. 저장된 실험은
-            대시보드와 세션 재생에서 볼 수 있습니다.
-          </p>
-        </div>
-      </Panel>
-    );
   return (
     <div className="stack">
       <Panel
-        title="최근 변경된 실행 기록"
-        subtitle={`2.5초마다 조회 · 마지막 갱신 ${date(updated)}`}
+        title="내 프로젝트의 실시간 세션"
+        subtitle={`서비스 게이트웨이 기록 (DB) · 2.5초마다 조회 · 마지막 갱신 ${date(updated)}`}
         action={
           <button onClick={() => setPaused(!paused)}>
             {paused ? <Play size={15} /> : <Pause size={15} />}{" "}
@@ -997,10 +981,30 @@ export function LivePage({ preview }) {
         {error && <ErrorBox error={error} />}
         <SessionTable rows={rows} open={(id) => setSelected(id)} />
         <p className="muted">
-          파일 갱신 시각 기준입니다. 실행 중 표시는 최근 활동의 보장이 아니며,
-          이 화면은 새 에이전트 실행을 시작하지 않습니다.
+          MAG 키로 서비스 게이트웨이를 거친 세션이 DB 에 쌓이는 대로
+          보입니다. 실행 중 표시는 최근 활동의 보장이 아니며, 이 화면은 새
+          에이전트 실행을 시작하지 않습니다.
         </p>
       </Panel>
+      {detail?.first_stop != null && (
+        <div className="stop-message live-alert" role="alert">
+          <b>
+            STOP · {detail.first_stop}단계
+            {detail.template ? ` · ${detail.template}` : ""}
+          </b>
+          <p>
+            {detail.stop_text ||
+              `${detail.first_stop}단계에서 STOP 판정이 기록되었습니다.`}
+          </p>
+          {detail.mode === "block" && (
+            <p className="muted">
+              {detail.blocked_step != null
+                ? `차단 모드 : ${detail.blocked_step}단계의 모델 요청을 업스트림으로 보내지 않고 403 으로 돌려주었습니다.`
+                : "차단 모드 : STOP 뒤의 모델 요청은 업스트림으로 보내지 않고 403 으로 돌려줍니다."}
+            </p>
+          )}
+        </div>
+      )}
       {detail && (
         <SessionViewer key={`${detail.id}:${detail.steps}`} session={detail} />
       )}

@@ -292,7 +292,31 @@ test("authenticated API, project create with CSRF, API failure and polling clean
   await expect(page.getByRole("alert")).toContainText("DB");
 });
 
-test("C-19-10: sign-in config from the server, live monitor waits for the gateway, sign-out with the session CSRF", async ({
+// C-19-9: one gateway session as GET /api/live/sessions{,/id} returns it (backend/routers/live.py shape).
+const liveStop = "개발 역할이 세 번 연속 같은 결과를 보고했습니다.";
+const liveRow = {
+  id: "p5-run-a", short: "run-a", session_key: "run-a", name: "실행기", task_name: "실행기",
+  variant: null, mode: "block", class: "stalled", termination: "guardrail_stop", steps: 3,
+  tokens: 120, first_stop: 3, template: "E1", stop_text: liveStop, blocked_step: 4,
+  started_at: "2026-11-17T04:00:00+00:00",
+  live: { status: "ended", updated_at: "2026-11-17T04:00:03+00:00", idle_seconds: 5, in_progress: null },
+};
+const liveStep = (n, label, extra = {}) => ({
+  n, agent: "developer", role: "developer", state: "stagnant", label, stop: null, blocked: false,
+  status: "completed", fail: [], tests: [7, 16], report: null, claim: null, tools: 0, tool_errors: 0,
+  changed: 0, paths: [], tok: null, cum: null, cumc: null, ...extra,
+});
+const liveSession = {
+  ...liveRow,
+  step_rows: [
+    liveStep(1, "기준"),
+    liveStep(2, "정체"),
+    liveStep(3, "정체", { stop: { t: "E1", text: liveStop } }),
+    liveStep(4, "차단 (403)", { blocked: true, status: "blocked", tests: null }),
+  ],
+};
+
+test("C-19-10 / C-19-9: sign-in config from the server, live monitor from the gateway DB, sign-out with the session CSRF", async ({
   page,
 }) => {
   let signedIn = false;
@@ -329,10 +353,12 @@ test("C-19-10: sign-in config from the server, live monitor waits for the gatewa
         judgement_ms: data.judgement_ms,
       });
     if (path === "/api/sessions") return respond({ count: 0, sessions: [] });
-    if (path.startsWith("/api/live/")) {
+    if (path === "/api/live/sessions") {
       liveCalls++;
-      return respond({ detail: "Not Found" }, 404);
+      return respond({ version: "service-live-v1", now: liveRow.started_at, sessions: [liveRow] });
     }
+    if (path === "/api/live/sessions/p5-run-a")
+      return respond({ version: "service-live-v1", now: liveRow.started_at, session: liveSession });
     return respond({ detail: "Not found" }, 404);
   });
   await page.goto("/login");
@@ -344,9 +370,15 @@ test("C-19-10: sign-in config from the server, live monitor waits for the gatewa
   ).toBeVisible();
   signedIn = true;
   await page.goto("/#live");
-  await expect(page.getByText("서버 게이트웨이 준비 중")).toBeVisible();
-  await page.waitForTimeout(3000);
-  expect(liveCalls).toBe(1);
+  await expect(page.getByText("서비스 게이트웨이 기록 (DB)")).toBeVisible();
+  await expect(page.getByText("서버 게이트웨이 준비 중")).toHaveCount(0);
+  await expect(page.getByText("차단 · 4").first()).toBeVisible();
+  await page.getByRole("button", { name: "run-a 세션 보기" }).click();
+  const alert = page.locator(".live-alert");
+  await expect(alert).toContainText("STOP · 3단계 · E1");
+  await expect(alert).toContainText(liveStop);
+  await expect(alert).toContainText("4단계의 모델 요청을 업스트림으로 보내지 않고 403");
+  await expect.poll(() => liveCalls).toBeGreaterThan(1);
   await page
     .getByRole("navigation")
     .getByRole("button", { name: "내 계정", exact: true })
@@ -470,7 +502,10 @@ test("C-19-8K: key issue shows the raw key once, list, revoke, project mode, gui
   ).toBeVisible();
   await expect(
     page.getByRole("heading", { name: /모델 호출 주소 연결/ }),
-  ).toContainText("서버 게이트웨이 준비 중");
+  ).not.toContainText("준비 중");
+  // C-19-9: the guide names this site's gateway address and the key header.
+  await expect(page.getByText(/\/v1 로 바꾸고, 요청마다 X-Guardrail-Key/)).toBeVisible();
+  await expect(page.getByText(/\/sessions\/observations 로 테스트와 구조화 보고/)).toBeVisible();
   await expect(page.getByText("API 키 관리 HTTP API가 없습니다")).toHaveCount(
     0,
   );
