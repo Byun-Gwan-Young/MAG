@@ -27,8 +27,16 @@ and the upstream timeout (600 s read, DM-79) are the Mac proxy's own. What the g
   request body and every header (Authorization, the guardrail key) are never passed. A failed utterance write is
   logged by exception type only and never fails the request.
 
+- C-19-11 (DM-122 ②) two slots : a deploy starts the new version on the other port (8050 <-> 8051) and Caddy moves
+  to it, while the old process stays until its sessions are over (deploy/aws/slots.sh drain). A session's judgement
+  state is in the old process's memory, so the new process hands a request for a session it does not hold, but the
+  DB already has, to the other slot (--peer-port, loopback only, after its own key check ; the other slot checks the
+  key again). X-Guardrail-Peer marks a handed-over request so it is never handed back. /healthz tells the drain how
+  many sessions are still open and how long ago the last request came.
+
 Limits (reported) : one worker ; sessions live in this process's memory, so a session recorded before a gateway restart
-cannot continue (409 : use a new session key) ; DB writes are synchronous inside the request.
+cannot continue (409 : use a new session key) once the process that held it is gone ; DB writes are synchronous
+inside the request.
 """
 import argparse
 import asyncio
@@ -41,6 +49,7 @@ from pathlib import Path
 import re
 import sys
 import tempfile
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -62,6 +71,14 @@ KEY_HEADER = 'X-Guardrail-Key'
 SESSION_HEADER = 'X-Guardrail-Session'
 MODEL_HEADER = 'X-Guardrail-Model'
 SCENARIO_HEADER = 'X-Guardrail-Scenario'
+# C-19-11 : set by a gateway on a request it hands to the other slot ; such a request is never handed on again.
+PEER_HEADER = 'X-Guardrail-Peer'
+PEER_PORTS = {8050: 8051, 8051: 8050}
+# What the other slot needs to treat the request as its own : the keys, the session and the run labels.
+PEER_PASSED = ('authorization', 'content-type', 'x-guardrail-key', 'x-guardrail-session', 'x-guardrail-model',
+               'x-guardrail-scenario', 'x-guardrail-run-index', 'x-guardrail-framework-version',
+               'x-guardrail-context-buffer-messages')
+PEER_TIMEOUT = httpx.Timeout(660.0, connect=2.0)   # as long as Caddy waits for one model turn
 HOST = '127.0.0.1'
 PORT = 8050
 LOOPBACK = ('127.0.0.1', 'localhost', '::1')
@@ -270,8 +287,13 @@ class Inner:
 
 
 class Gateway:
-    def __init__(self, accounts, live, transport=None, workdir=None, max_body=DEFAULT_MAX_BODY, root=ROOT):
+    def __init__(self, accounts, live, transport=None, workdir=None, max_body=DEFAULT_MAX_BODY, root=ROOT,
+                 peer=None, peer_transport=None):
         self.accounts, self.live, self.transport, self.max_body = accounts, live, transport, max_body
+        # C-19-11 : the other slot's gateway (http://127.0.0.1:<port>), None when there is none.
+        self.peer = None if peer is None else httpx.AsyncClient(base_url=peer, timeout=PEER_TIMEOUT,
+                                                                transport=peer_transport)
+        self.last_request = time.monotonic()
         self.workdir = Path(workdir or tempfile.mkdtemp(prefix='mag-gateway-'))
         self.demo_model = demo_model(root)
         self.inner = {}    # (project id, mode, provider, base URL, model) -> Inner
@@ -310,6 +332,30 @@ class Gateway:
         return Response(content=response.content, status_code=response.status_code, headers=headers,
                         media_type=response.headers.get('content-type'))
 
+    # --- the other slot (C-19-11) ---
+
+    async def to_peer(self, request, method, path, body, otherwise):
+        """Hand a request for a session this process does not hold to the other slot ; `otherwise` (this process's
+        own refusal) when there is no other slot, the request already came from one, or nothing listens there."""
+        if self.peer is None or request.headers.get(PEER_HEADER):
+            return otherwise
+        headers = {k: v for k, v in request.headers.items() if k.lower() in PEER_PASSED}
+        headers[PEER_HEADER] = '1'
+        try:
+            response = await self.peer.request(method, path, headers=headers, content=body)
+        except httpx.ConnectError:
+            return otherwise
+        except httpx.HTTPError as exc:   # no header or body value in the log line
+            logger.warning('Other slot did not answer (%s)', type(exc).__name__)
+            return error(502, 'other_slot_unavailable', '이 세션을 가진 게이트웨이가 응답하지 않습니다')
+        return self.relay(response)
+
+    def open_sessions(self):
+        """Sessions this process started that have not ended (the drain waits for 0)."""
+        ended = sum(1 for inner in self.inner.values() for state in inner.repository.written.values()
+                    if state['ended'])
+        return max(len(self.routes) - ended, 0)
+
     # --- checks in front of the proxy ---
 
     async def authenticate(self, request):
@@ -324,6 +370,7 @@ class Gateway:
             return error(503, 'key_check_unavailable', '키 확인을 할 수 없습니다. 잠시 뒤 다시 시도하세요')
         if project is None:
             return error(401, 'guardrail_key_invalid', 'MAG API 키가 없거나 폐기되었습니다')
+        self.last_request = time.monotonic()
         if project.get('read_only'):
             return error(403, 'project_read_only', '데모 프로젝트는 읽기 전용입니다')
         if project.get('mode') not in DEMO_CONFIGS:
@@ -369,8 +416,10 @@ class Gateway:
             if known is None:
                 return error(503, 'session_store_unavailable', '세션 기록 DB 에 연결할 수 없습니다')
             if known:
-                return error(409, 'session_recorded_before_restart',
-                             '이 세션 키는 게이트웨이 재시작 전에 기록되었습니다. 새 세션 키를 쓰세요')
+                refusal = error(409, 'session_recorded_before_restart',
+                                '이 세션 키는 게이트웨이 재시작 전에 기록되었습니다. 새 세션 키를 쓰세요')
+                refusal.recorded_elsewhere = True
+                return refusal
             inner_key = self.routes.setdefault(route, (project['id'], project['mode'], provider, base_url, model))
         inner = self.inner_app(inner_key)
         if scenario is not None and key not in inner.repository.written:
@@ -405,14 +454,15 @@ def model_name(value):
     return value if isinstance(value, str) and MODEL_NAME.fullmatch(value) else None
 
 
-def create_app(*, accounts=None, live=None, transport=None, workdir=None, max_body=None, root=ROOT):
+def create_app(*, accounts=None, live=None, transport=None, workdir=None, max_body=None, root=ROOT, peer=None,
+               peer_transport=None):
     if accounts is None:
         from storage import accounts
     if live is None:
         from storage import live
     if max_body is None:
         max_body = int(os.environ.get(MAX_BODY_ENV, DEFAULT_MAX_BODY))
-    gateway = Gateway(accounts, live, transport, workdir, max_body, root)
+    gateway = Gateway(accounts, live, transport, workdir, max_body, root, peer, peer_transport)
     app = FastAPI(title='MAG service gateway (Multi-Agent Guardrail)', version=GATEWAY_VERSION,
                   docs_url=None, redoc_url=None, openapi_url=None)
     app.state.gateway = gateway
@@ -429,6 +479,13 @@ def create_app(*, accounts=None, live=None, transport=None, workdir=None, max_bo
         if body is None:
             return gateway.too_large()
         return (*checked, key, body)
+
+    async def elsewhere(refusal, request, method, path, raw):
+        """C-19-11 : a session the DB has but this process does not may be open in the other slot (a deploy in
+        progress) ; every other refusal is final."""
+        if refusal.status_code == 409 and getattr(refusal, 'recorded_elsewhere', False):
+            return await gateway.to_peer(request, method, path, raw, refusal)
+        return refusal
 
     @app.post('/v1/chat/completions')
     async def chat(request: Request):
@@ -457,7 +514,7 @@ def create_app(*, accounts=None, live=None, transport=None, workdir=None, max_bo
             return problem
         inner = await gateway.open_route(project, provider, base_url, key, model, scenario)
         if isinstance(inner, Response):
-            return inner
+            return await elsewhere(inner, request, 'POST', '/v1/chat/completions', raw)
         return gateway.relay(await gateway.forward(inner, 'POST', '/v1/chat/completions', request, key, raw))
 
     @app.post('/sessions')
@@ -481,7 +538,7 @@ def create_app(*, accounts=None, live=None, transport=None, workdir=None, max_bo
         new = (project['id'], key) not in gateway.routes
         inner = await gateway.open_route(project, provider, base_url, key, model, scenario)
         if isinstance(inner, Response):
-            return inner
+            return await elsewhere(inner, request, 'POST', '/sessions', raw)
         response = await gateway.forward(inner, 'POST', '/sessions', request, key, raw)
         if new and response.is_error:
             gateway.routes.pop((project['id'], key), None)
@@ -497,7 +554,7 @@ def create_app(*, accounts=None, live=None, transport=None, workdir=None, max_bo
             return error(400, 'session_key_required', SESSION_HEADER + ' 헤더가 필요합니다')
         inner = gateway.routed(project, key)
         if inner is None:
-            return unknown_session()
+            return await gateway.to_peer(request, method, path, raw, unknown_session())
         return gateway.relay(await gateway.forward(inner, method, path, request, key, raw))
 
     @app.post('/sessions/observations')
@@ -532,7 +589,8 @@ def create_app(*, accounts=None, live=None, transport=None, workdir=None, max_bo
     async def healthz():
         # Local only (Caddy does not route it) : no project, key or address in it.
         return {'status': 'ok', 'gateway_version': GATEWAY_VERSION, 'inner_proxies': len(gateway.inner),
-                'sessions': len(gateway.routes)}
+                'sessions': len(gateway.routes), 'open_sessions': gateway.open_sessions(),
+                'idle_seconds': int(time.monotonic() - gateway.last_request)}
 
     return app
 
@@ -541,13 +599,20 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--host', default=HOST)
     parser.add_argument('--port', type=int, default=PORT)
+    parser.add_argument('--peer-port', type=int, default=None,
+                        help="the other slot's gateway port (default : 8051 for 8050 and back ; 0 = none)")
     args = parser.parse_args(argv)
     if args.host not in LOOPBACK:
         print(json.dumps({'error': f'refusing to bind {args.host!r}: Caddy fronts the gateway, loopback only'}))
         return 2
+    peer_port = PEER_PORTS.get(args.port) if args.peer_port is None else args.peer_port
+    if peer_port == args.port or not 0 <= (peer_port or 0) <= 65535:
+        print(json.dumps({'error': f'peer port {peer_port!r} is not another port'}))
+        return 2
     logging.basicConfig(level=logging.INFO)
     import uvicorn
-    uvicorn.run(create_app(), host=args.host, port=args.port, workers=1, log_level='info')
+    uvicorn.run(create_app(peer=f'http://127.0.0.1:{peer_port}' if peer_port else None), host=args.host,
+                port=args.port, workers=1, log_level='info')
     return 0
 
 
