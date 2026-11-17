@@ -270,8 +270,7 @@ flowchart TB
 | 웹 | Caddy — Let's Encrypt 인증서 자동, 보안 헤더, `forward_auth` 로 사이트 전체를 로그인 뒤에 |
 | 백엔드 | FastAPI 2 개 (systemd) — 서비스 백엔드 `127.0.0.1:8030`, 읽기 전용 조회 API `127.0.0.1:8020` |
 | DB | PostgreSQL (`guardrail_demo`), 실시간 상태 캐시용 Redis 계층 |
-| 배포 | `deploy/aws/deploy.sh` — main 의 커밋된 파일만 묶어 보내고 릴리스 폴더를 바꿔 끼움 |
-| 다음 | 키로 받는 서버 게이트웨이 · 실시간 대시보드 (C-19-9), React 화면 전환, CI/CD 무중단 배포 |
+| 배포 | main 에 push 하면 GitHub Actions 가 테스트 뒤 자동 배포 (`.github/workflows/deploy.yml`) — 새 버전을 쉬는 칸에 띄워 확인한 뒤 Caddy 를 전환 (무중단). 손으로는 `deploy/aws/deploy.sh` |
 
 ---
 
@@ -468,6 +467,7 @@ AI-agent-guardrail-harness/
 ├── README.md                              이 문서 (MAG 소개)
 ├── .gitignore                             커밋하지 않는 것 (키 · venv · 세션 원본 · docs/handoff)
 ├── .gitattributes                         동결 파일의 LF 바이트 유지 (Windows freeze hash 보호)
+├── .github/                               GitHub Actions : 자동 테스트 (ci.yml) · main 자동 무중단 배포 (deploy.yml)
 ├── requirements.txt                       파이썬 패키지 목록 (Python 3.14)
 ├── proxy.py                               OpenAI 호환 프록시 : 요청 중계 · 세션 기록 · 판정 · 차단
 ├── session_store.py                       세션 저장과 재시작 복원

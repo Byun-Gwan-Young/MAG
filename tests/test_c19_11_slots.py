@@ -362,6 +362,20 @@ class SlotTests(unittest.TestCase):
         self.assertEqual(self.server.run(second, 'rollback').returncode, 1)
         self.assertEqual((self.server.link('app'), self.server.env()['GUARDRAIL_SLOT']), (second.name, 'a'))
 
+    def test_drill_fails_for_real_and_changes_nothing(self):
+        release = self.server.release()
+        self.server.in_slot('a', release)
+        before = self.server.caddy_env.read_text()
+        # The fake curl answers like a live service unless told otherwise : here the stopped backend must not answer.
+        self.server.fail('8031/healthz')
+        result = self.server.run(release, 'drill')
+        self.unchanged(release, before, result)
+        self.assertEqual(self.server.calls('caddy'), [])
+        calls = [' '.join(c) for c in self.server.calls()]
+        started = calls.index('systemctl restart guardrail-backend@b.service')
+        stopped = calls.index('systemctl stop guardrail-backend@b.service', started)
+        self.assertLess(stopped, next(i for i, c in enumerate(calls) if '8031/healthz' in c))
+
     def test_the_release_in_use_and_the_two_before_it_are_kept(self):
         releases = [self.server.release() for _ in range(5)]
         self.server.in_slot('a', releases[0])                # the oldest is still what slot a runs

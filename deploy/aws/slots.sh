@@ -6,6 +6,9 @@
 #   sudo bash slots.sh deploy RELEASE_DIR DOMAIN   start RELEASE_DIR in the idle slot, check it, move Caddy to it
 #   sudo bash slots.sh rollback [RELEASE_NAME]     the same with a release already on the server (default : the newest
 #                                                  one that is not in use). No DB load.
+#   sudo bash slots.sh drill                       practice a failed deploy : the release in use is started in the idle
+#                                                  slot with its backend stopped, so the health check really fails ;
+#                                                  shows that nothing switches. Ends with 1 on purpose.
 #   sudo bash slots.sh status                      the slot in use, each slot's release and unit states
 #   sudo bash slots.sh drain SLOT                  (started by deploy) stop SLOT's gateway when its sessions are over
 #
@@ -40,6 +43,7 @@ DRAIN_MAX=${GUARDRAIL_DRAIN_MAX_SECONDS:-3600}          # the old gateway never 
 DRAIN_IDLE=${GUARDRAIL_DRAIN_IDLE_SECONDS:-900}         # longer than one model turn may take (Caddy waits 660 s)
 DRAIN_POLL=${GUARDRAIL_DRAIN_POLL_SECONDS:-15}
 FIRST_DEPLOY=no
+DRILL=no
 KEEP_RELEASES=3                                         # the one in use and the two before it
 
 die() { printf '중단 : %s\n' "$*" >&2; exit 1; }
@@ -133,6 +137,8 @@ start_slot() {    # start_slot SLOT RELEASE
     for service in $SERVICES; do
         systemctl restart "$(unit "$service" "$slot")" || return 1
     done
+    # drill : a version whose backend does not come up (the check below is the real one and really fails).
+    [[ "$DRILL" == no ]] || systemctl stop "$(unit backend "$slot")"
     healthy "$slot"
 }
 
@@ -326,6 +332,16 @@ rollback() {    # rollback [RELEASE_NAME]
     deploy "$release" "$domain"
 }
 
+drill() {
+    local current
+    current=$(cd "$OPT/app" 2>/dev/null && pwd -P) || die "배포된 릴리스가 없다"
+    [[ "$(active_slot)" != none ]] || die "쓰는 칸이 없다"
+    step "연습 : 백엔드가 뜨지 않는 버전을 배포한다 (실패해야 정상, 지금 버전은 그대로여야 한다)"
+    DRILL=yes
+    HEALTH_TRIES=5
+    deploy "$current" "$(env_value GUARDRAIL_DOMAIN)"
+}
+
 status() {
     local active slot service link
     active=$(active_slot)
@@ -345,8 +361,9 @@ status() {
 case "${1:-}" in
     deploy) need_root; [[ $# -eq 3 ]] || die "slots.sh deploy RELEASE_DIR DOMAIN"; deploy "$2" "$3" ;;
     rollback) need_root; rollback "${2:-}" ;;
+    drill) need_root; drill ;;
     drain) need_root; [[ $# -eq 2 ]] || die "slots.sh drain SLOT"; drain "$2" ;;
     status) status ;;
     pick) active=$(active_slot); idle_slot "$active"; printf '\n' ;;
-    *) sed -n '2,26p' "$0"; exit 2 ;;
+    *) sed -n '2,29p' "$0"; exit 2 ;;
 esac

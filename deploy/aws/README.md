@@ -1,6 +1,28 @@
 # deploy/aws — 데모 서버 (AWS EC2 한 대)
 
-데모 화면과 조회 API 를 팀원 · 교수님만 볼 수 있게 AWS 서버 한 대로 엽니다 (C-19-7, DM-91 · DM-93). Claude Code 는 AWS 에 접속하지 않습니다. 이 폴더의 스크립트는 **PM 이 맥과 서버에서** 돌립니다. 순서와 명령은 [`reports/c19-7/pm-commands.md`](../../reports/c19-7/pm-commands.md) 에 있습니다.
+데모 화면과 조회 API 를 팀원 · 교수님만 볼 수 있게 AWS 서버 한 대로 엽니다 (C-19-7, DM-91 · DM-93). Claude Code 는 AWS 에 접속하지 않습니다. 이 폴더의 스크립트는 **PM 이 맥과 서버에서**, 그리고 (C-19-11 부터) **GitHub 러너가** 돌립니다. 처음 만드는 순서는 [`reports/c19-7/pm-commands.md`](../../reports/c19-7/pm-commands.md), 자동 배포 준비는 [`reports/c19-11/pm-commands.md`](../../reports/c19-11/pm-commands.md) 에 있습니다.
+
+## 자동 무중단 배포 (C-19-11, DM-122)
+
+main 에 push 하면 GitHub Actions 가 오프라인 테스트 · 동결 검사 · 프론트 빌드를 돌리고 ([`ci.yml`](../../.github/workflows/ci.yml)), 통과하면 묶음을 만들어 서버로 보냅니다 ([`deploy.yml`](../../.github/workflows/deploy.yml)). PM 의 인터넷에 기대지 않습니다.
+
+```text
+GitHub 러너 ── OIDC ──▶ AWS 역할 (보안 그룹 22 번 규칙 추가 · 삭제만)
+     │  ① 러너 IP/32 를 22 번에 추가        ④ 끝나면 (실패해도) 삭제
+     │  ② 묶음을 배포 전용 계정으로 (명령 하나만 되는 키)
+     ▼
+서버  guardrail-deploy → remote-install.sh → slots.sh
+     칸 a : 조회 API 8020 · 백엔드 8030 · 게이트웨이 8050
+     칸 b : 조회 API 8021 · 백엔드 8031 · 게이트웨이 8051
+     ③ 쉬는 칸에 새 버전 → 세 서비스가 응답하면 Caddy 를 그 칸으로 (reload, 연결 유지) → 옛 칸 정리
+        하나라도 응답이 없으면 전환하지 않고 실패 (쓰던 버전 그대로)
+```
+
+- 쓰는 칸은 `/etc/guardrail/caddy.env` 의 `GUARDRAIL_SLOT` 과 업스트림 세 줄입니다. `deploy/aws/remote.sh status` 로 봅니다
+- 옛 칸의 게이트웨이는 바로 끄지 않습니다. 진행 중 세션의 판정 상태 (연속 횟수) 가 그 프로세스 메모리에 있기 때문에, 열린 세션이 0 이 되거나 · 15 분 동안 요청이 없거나 · 1 시간이 지날 때까지 남고, 새 게이트웨이가 그 세션의 요청을 넘겨줍니다
+- 로그인 세션은 백엔드 메모리에 있어 배포 뒤 한 번 다시 로그인합니다 (PM 11/17 : 감수)
+- 되돌리기 : `deploy/aws/remote.sh rollback` (쓰는 릴리스와 그 앞 2 개가 서버에 남습니다, DB 적재 없음). 실패 연습 : `deploy/aws/remote.sh drill`
+- 손 배포 `deploy/aws/deploy.sh` 도 같은 `remote-install.sh` · `slots.sh` 를 거칩니다
 
 ## 구조
 
@@ -34,9 +56,15 @@ React 화면은 같은 서버의 API (`/api/auth/me` · `/api/summary` · `/api/
 | [`server-setup.sh`](server-setup.sh) | 서버 (sudo, 한 번) | PostgreSQL · Caddy (공식 apt 저장소) · uv · Python 3.14, 사용자 `guardrail`, 폴더, DB 역할 · DB, 서비스 가상환경. 다시 돌려도 안전 |
 | [`deploy.sh`](deploy.sh) | 맥 | 묶음 만들기 → 보내기 → 서버 설치 (`remote-install.sh`) → 확인 결과 가져오기 → `https://도메인/api/summary` 확인 |
 | [`bundle.py`](bundle.py) | 맥 | 서버로 가는 묶음 : `git archive main` 의 포함 목록 − 제외 목록, React 빌드 (`frontend/dist`) · 참고 데이터 · 옛 화면, 검사 (빌드 JS · CSS 의 키 패턴 포함) |
-| [`remote-install.sh`](remote-install.sh) | 서버 (deploy 가 실행) | 릴리스 폴더 → 가상환경 → `storage init` · `storage demo-all` · `service.load_demo check` (하나라도 다르면 멈춤, 이전 릴리스 유지) → API 재시작 → Caddy |
+| [`remote-install.sh`](remote-install.sh) | 서버 (deploy 가 실행) | 릴리스 폴더 → 가상환경 → `storage init` · `storage demo-all` · `service.load_demo check` (하나라도 다르면 멈춤, 이전 릴리스 유지) → `backend.env` → `slots.sh deploy` |
+| [`slots.sh`](slots.sh) | 서버 | 두 칸 전환 : 쉬는 칸에 새 버전 → 상태 확인 → Caddy 전환 → 옛 칸 정리 (`deploy`), 되돌리기 (`rollback`), 실패 연습 (`drill`), 상태 (`status`), 옛 게이트웨이 대기 (`drain`) |
+| [`guardrail-deploy.sh`](guardrail-deploy.sh) | 서버 `/usr/local/sbin/guardrail-deploy` | 배포 전용 계정이 root 로 돌릴 수 있는 단 하나의 명령 : 표준 입력의 묶음을 검사하고 `remote-install.sh` 로 설치 |
+| [`deploy-user-setup.sh`](deploy-user-setup.sh) | 서버 (sudo, 한 번) | 배포 전용 계정 `guardrail-deploy` · 그 명령 하나에 묶인 키 · sudoers 한 줄 |
+| [`ci-setup.sh`](ci-setup.sh) | 맥 | 배포 전용 키 만들기 · 서버에 계정 만들기 · GitHub Secrets 값 하나씩 꺼내기 · IAM 정책 JSON |
+| [`ci-runner-access.sh`](ci-runner-access.sh) | GitHub 러너 | 러너 IP/32 를 보안 그룹 22 번에 추가 (`open`) · 삭제 (`close`). 그보다 넓게 여는 길이 없다 |
+| [`ci-send.sh`](ci-send.sh) | GitHub 러너 | 묶음을 배포 전용 계정으로 보냄 (호스트 키 고정, 키 파일은 끝나면 삭제) |
 | [`Caddyfile.template`](Caddyfile.template) | 서버 `/etc/caddy/Caddyfile` | HTTPS, 로그인 먼저, 백엔드 (구글 로그인) · API 로 가는 경로 목록, React 단일 페이지 앱, 보안 헤더. 도메인 · 해시는 환경 파일에서 |
-| [`guardrail-api.service`](guardrail-api.service) | 서버 systemd | 조회 API (`guardrail` 사용자, `127.0.0.1:8020`, `Restart=always`) |
+| [`guardrail-api@.service`](guardrail-api@.service) · [`guardrail-backend@.service`](guardrail-backend@.service) · [`guardrail-gateway@.service`](guardrail-gateway@.service) | 서버 systemd | 칸마다 하나씩 뜨는 유닛 (`guardrail-api@a` …). 칸의 릴리스 `/opt/guardrail/slots/칸`, 포트 `/etc/guardrail/slot-칸.env` |
 | [`lib.sh`](lib.sh) | — | 위 스크립트가 함께 쓰는 값 · 함수 |
 
 `target.env` (도메인 · 서버 IP · SSH 키 경로) 는 git 에서 제외됩니다. 비밀번호 · AWS 자격 증명 · 계정 ID 는 어느 파일에도 쓰지 않습니다 (자격 증명은 맥의 `~/.aws` 에만).
@@ -49,7 +77,7 @@ React 화면은 같은 서버의 API (`/api/auth/me` · `/api/summary` · `/api/
 
 ## 다시 배포하기
 
-main 에 커밋한 뒤 맥에서 `deploy/aws/deploy.sh` 를 다시 돌립니다. 새 릴리스 폴더에서 적재 · 확인이 모두 같을 때만 전환하고, 최근 릴리스 3 개를 남깁니다.
+main 에 push 하면 자동으로 배포됩니다 (위 "자동 무중단 배포"). 손으로는 맥에서 `deploy/aws/deploy.sh` 를 돌립니다. 어느 쪽이든 새 릴리스 폴더에서 적재 · 확인이 모두 같고 새 칸의 세 서비스가 응답할 때만 전환하며, 쓰는 릴리스와 그 앞 2 개를 남깁니다.
 
 ## 끄기 · 비용
 

@@ -5,6 +5,7 @@
 #   deploy/aws/remote.sh setup      send server-setup.sh and run it with sudo (once ; safe to repeat)
 #   deploy/aws/remote.sh status     Caddy · PostgreSQL state, the slot in use (C-19-11) and the deployed commit
 #   deploy/aws/remote.sh rollback   put the previous release back in use (slots.sh rollback ; no DB load)
+#   deploy/aws/remote.sh drill      practice a failed deploy (slots.sh drill) : it must fail and change nothing
 #   deploy/aws/remote.sh dns        does the domain's A record point at the server IP yet (dig, from this Mac)
 #   deploy/aws/remote.sh open       open https://DOMAIN/ in the browser
 #   deploy/aws/remote.sh allow-email EMAIL    add EMAIL to the sign-in list (used only if open sign-up is turned off)
@@ -33,6 +34,8 @@ case "${1:-}" in
             cat /opt/guardrail/app/DEPLOY_INFO.json 2>/dev/null | head -n 4 || echo "아직 배포 안 됨"' ;;
     rollback)
         ssh "${SSH_OPTS[@]}" "$SSH_DEST" 'sudo bash /opt/guardrail/app/deploy/aws/slots.sh rollback' ;;
+    drill)
+        ssh "${SSH_OPTS[@]}" "$SSH_DEST" 'sudo bash /opt/guardrail/app/deploy/aws/slots.sh drill' ;;
     dns)
         resolved=$(dig +short "$GUARDRAIL_DOMAIN" A | tail -n 1)
         if [[ "$resolved" == "$GUARDRAIL_SERVER_IP" ]]; then
@@ -49,5 +52,5 @@ case "${1:-}" in
     allowed-emails)
         storage_cli allowed-emails ;;
     *)
-        sed -n '2,13p' "$0"; exit 2 ;;
+        sed -n '2,14p' "$0"; exit 2 ;;
 esac

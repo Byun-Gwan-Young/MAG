@@ -490,8 +490,8 @@ class Bundle(unittest.TestCase):
         for present in ('site/index.html', 'DEPLOY_INFO.json', 'service/api.py', 'storage/__main__.py',
                         'service/requirements-server.txt', 'deploy/aws/remote-install.sh', 'scenarios/README.md',
                         'reports/c19/aggregate-main.json', 'docs/criteria/demo-final-freeze.json',
-                        'backend/main.py', 'backend/templates/login.html', 'deploy/aws/guardrail-backend.service',
-                        'service/gateway.py', 'proxy.py', 'deploy/aws/guardrail-gateway.service',
+                        'backend/main.py', 'backend/templates/login.html', 'deploy/aws/guardrail-backend@.service',
+                        'service/gateway.py', 'proxy.py', 'deploy/aws/guardrail-gateway@.service', 'deploy/aws/slots.sh',
                         'guardrail-deadlock-v0.3-kmu-block.yaml', 'demo-conditions.yaml'):
             self.assertIn(present, paths)
         self.assertEqual(len([p for p in paths if p.endswith('/record/replay.json')]), 115)
