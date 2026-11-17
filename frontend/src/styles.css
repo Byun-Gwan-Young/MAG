@@ -1909,3 +1909,67 @@ footer {
     padding: 4px 0;
   }
 }
+
+/* C-19-9c: the project's delete zone and the name-typed confirmation dialog. */
+.delete-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 20px 22px;
+}
+.delete-zone p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.delete-zone .danger {
+  flex: none;
+}
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(31, 29, 26, 0.45);
+}
+.modal {
+  width: min(460px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  background: var(--card);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 18px 50px rgba(31, 29, 26, 0.25);
+}
+.modal h3 {
+  margin: 0;
+  padding: 20px 20px 8px;
+  font-size: 16px;
+}
+.modal > p {
+  margin: 0;
+  padding: 0 20px 18px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+.modal > p b {
+  color: var(--fg);
+}
+.modal .actions {
+  justify-content: flex-end;
+}
+@media (max-width: 720px) {
+  .delete-zone {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .modal .actions > button {
+    flex: 1;
+    justify-content: center;
+  }
+}

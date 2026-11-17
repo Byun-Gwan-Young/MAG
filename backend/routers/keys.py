@@ -1,5 +1,6 @@
 """C-19-8K : guardrail API keys (issue · list · revoke) and the project mode (observe · block) ;
-C-19-8P : the project's LLM provider through the same PATCH.
+C-19-8P : the project's LLM provider through the same PATCH ; C-19-9c : the key list shows live keys only, and
+DELETE /api/projects/{id} deletes a project (keys revoked, its sessions and records deleted).
 
 Everything goes through storage/accounts.py (no SQL here). The raw key leaves the server once, in the issue response
 (never stored, logged, or put in an error). Someone else's project or key is 404 ; the shared read-only demo project
@@ -16,7 +17,7 @@ from storage.safety import assert_no_secrets
 
 from backend.auth.dependencies import get_current_user
 from backend.schemas import (ApiKeyIssueRequest, ApiKeyIssueResponse, ApiKeyResponse, ApiKeyRevokeResponse,
-                             CsrfRequest, ProjectModeRequest, ProjectResponse)
+                             CsrfRequest, ProjectDeleteResponse, ProjectModeRequest, ProjectResponse)
 
 
 router = APIRouter(tags=["keys"])
@@ -107,3 +108,16 @@ def set_mode(payload: ProjectModeRequest, project_id: int = Path(..., ge=1, le=M
         # C-19-9b : off deletes the project's stored utterances in the same storage transaction.
         _call(accounts.set_project_utterance_log, project_id, user["id"], payload.utterance_log)
     return _writable_project(user, project_id)
+
+
+@router.delete("/api/projects/{project_id}", response_model=ProjectDeleteResponse)
+def delete_project(payload: CsrfRequest, project_id: int = Path(..., ge=1, le=MAX_ID),
+                   user=Depends(get_current_user)):
+    """C-19-9c (DM-121) : delete the caller's own project. Its keys are revoked (the gateway answers 401 from then
+    on, a running session included), and its sessions, steps, judgements, LLM calls and utterances are deleted, in
+    one storage transaction (storage.accounts.delete_project). The revoked key records and the audit events stay.
+    CSRF ; someone else's or a missing project 404 ; the demo project 403."""
+    _check_csrf(user, payload.csrf_token)
+    _writable_project(user, project_id)
+    result = _call(accounts.delete_project, project_id, user["id"])
+    return {"id": project_id, "deleted": True, "revoked_api_keys": result["revoked_api_keys"]}

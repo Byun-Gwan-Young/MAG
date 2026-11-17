@@ -88,6 +88,8 @@ class BackendTests(unittest.TestCase):
             ALTER TABLE projects ADD COLUMN provider TEXT NOT NULL DEFAULT 'kmu';
             -- C-19-9b : the project list shows the utterance log setting (off by default, storage/schema.sql).
             ALTER TABLE projects ADD COLUMN utterance_log BOOLEAN NOT NULL DEFAULT 0;
+            -- C-19-9c : a deleted project keeps its row with deleted_at set (storage/schema.sql).
+            ALTER TABLE projects ADD COLUMN deleted_at TEXT;
             CREATE TABLE scenarios (id INTEGER PRIMARY KEY, project_id INTEGER);
             CREATE TABLE sessions (
                 id TEXT PRIMARY KEY, scenario_id INTEGER, status TEXT,
@@ -151,6 +153,14 @@ class BackendTests(unittest.TestCase):
         status, body = self.get("/api/projects")
         self.assertEqual(status, 200)
         self.assertEqual([p["id"] for p in json.loads(body)], [1, 2])
+
+    def test_a_deleted_project_is_not_listed_and_its_sessions_are_404(self):
+        # C-19-9c : storage.accounts.delete_project sets deleted_at (the row stays for the revoked key records).
+        self.db.execute("UPDATE projects SET deleted_at = '2026-11-17T05:00:00+00:00' WHERE id = 1")
+        status, body = self.get("/api/projects")
+        self.assertEqual((status, [p["id"] for p in json.loads(body)]), (200, [2]))
+        self.assertEqual(self.get("/api/projects/1/sessions")[0], 404)
+        self.assertEqual(self.get("/api/projects/1/sessions/saved-session")[0], 404)
 
     def test_session_pagination_and_project_scope(self):
         self.db.executescript("""

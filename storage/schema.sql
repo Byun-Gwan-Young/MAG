@@ -437,6 +437,18 @@ CREATE INDEX IF NOT EXISTS idx_utterances_expires_at
     ON utterances (expires_at);
 
 -- ---------------------------------------------------------
+-- 9. 프로젝트 삭제 (C-19-9c, DM-121)
+-- storage.accounts.delete_project 가 한 트랜잭션에서 그 프로젝트의 키를 모두 폐기하고,
+-- 세션 · 관측 · 판정 · LLM 호출 · 발화 · 시나리오를 지운 뒤 이 칸에 삭제 시각을 쓴다.
+-- 프로젝트 행 자체는 남긴다 : api_keys.project_id 가 이 행을 가리키고, 폐기한 키의 기록
+-- (앞자리 · 해시 · 폐기 시각) 은 보안 감사용으로 지우지 않기 때문이다. deleted_at 이 있는
+-- 프로젝트는 목록 · 키 · 게이트웨이 · 새 세션 어디에도 나오지 않는다. 계정 최종 삭제
+-- (purge_account) 는 owner_user_id 로 이 행과 키 기록까지 지운다.
+-- ---------------------------------------------------------
+ALTER TABLE projects
+    ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+
+-- ---------------------------------------------------------
 -- 기존 DB에 대한 데이터 삭제/강제 마이그레이션은 이 파일에서 하지 않는다.
 -- 옛 scenario-v1 정리와 NOT NULL 강화는
 -- `python -m storage.migrate_current_contract --apply ...`로 명시적으로 수행한다.

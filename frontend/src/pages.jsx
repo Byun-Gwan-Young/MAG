@@ -26,7 +26,7 @@ import {
   Trash2,
   Workflow,
 } from "lucide-react";
-import { logout, patch, post, request } from "./api.js";
+import { logout, patch, post, remove, request } from "./api.js";
 import {
   Badge,
   Empty,
@@ -1242,6 +1242,7 @@ export function Projects({ user, preview }) {
     setOffset(0);
     setDetail(null);
     setNextProvider(null);
+    setProjectNotice(null);
   };
   // C-19-8K: change the selected project's mode (observe · block).
   const [modeBusy, setModeBusy] = useState(false);
@@ -1303,6 +1304,38 @@ export function Projects({ user, preview }) {
       setLogBusy(false);
     }
   };
+  // C-19-9c: delete the selected project. The dialog's button turns on only when the project's
+  // name is typed exactly. The server revokes its keys and deletes its sessions and records.
+  const [deleting, setDeleting] = useState(false);
+  const [confirmName, setConfirmName] = useState("");
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [projectNotice, setProjectNotice] = useState(null);
+  const openDelete = () => {
+    setConfirmName("");
+    setError(null);
+    setDeleting(true);
+  };
+  const deleteProject = async (target) => {
+    setDeleteBusy(true);
+    setError(null);
+    try {
+      await remove(`/api/projects/${target.id}`, {
+        csrf_token: user.csrf_token,
+      });
+      setDeleting(false);
+      setSelected(null);
+      setDetail(null);
+      setProjectNotice(
+        `'${target.name}' 프로젝트를 삭제했습니다. 키는 모두 폐기했고 세션 기록은 지웠습니다.`,
+      );
+      projects.retry();
+    } catch (e) {
+      setError(e);
+      setDeleting(false);
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
   const current = projects.data?.find((p) => p.id === selected);
   const loadDetail = async (id) => {
     setError(null);
@@ -1327,6 +1360,11 @@ export function Projects({ user, preview }) {
     );
   return (
     <div className="stack">
+      {projectNotice && (
+        <p className="notice" role="status">
+          {projectNotice}
+        </p>
+      )}
       <div className="grid-two">
         <Panel
           title="내 프로젝트"
@@ -1501,6 +1539,33 @@ export function Projects({ user, preview }) {
             </p>
           )}
         </Panel>
+      )}
+      {current && (
+        <Panel
+          title="프로젝트 삭제"
+          subtitle={`${current.name} · 되돌릴 수 없습니다.`}
+        >
+          <div className="delete-zone">
+            <p className="muted">
+              이 프로젝트의 API 키를 모두 폐기하고, 세션 · step · 판정 기록과
+              발화 기록을 지웁니다. 실행 중인 세션도 다음 요청부터 거절됩니다.
+            </p>
+            <button className="danger" onClick={openDelete}>
+              <Trash2 size={15} />
+              프로젝트 삭제
+            </button>
+          </div>
+        </Panel>
+      )}
+      {deleting && current && (
+        <DeleteProjectDialog
+          project={current}
+          value={confirmName}
+          onChange={setConfirmName}
+          busy={deleteBusy}
+          onCancel={() => setDeleting(false)}
+          onConfirm={() => deleteProject(current)}
+        />
       )}
       {selected && (
         <Panel
@@ -1701,6 +1766,76 @@ export function Account({ user, preview, refresh }) {
           </>
         )}
       </Panel>
+    </div>
+  );
+}
+
+// C-19-9c: the delete confirmation. The delete button stays off until the project's name is
+// typed exactly as it is; Escape or the backdrop closes it without deleting.
+function DeleteProjectDialog({
+  project,
+  value,
+  onChange,
+  busy,
+  onCancel,
+  onConfirm,
+}) {
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape" && !busy) onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [busy, onCancel]);
+  const matches = value === project.name;
+  return (
+    <div
+      className="modal-backdrop"
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !busy) onCancel();
+      }}
+    >
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="delete-project-title"
+      >
+        <h3 id="delete-project-title">프로젝트를 삭제할까요?</h3>
+        <p>
+          <b>{project.name}</b> 프로젝트의 API 키를 모두 폐기하고, 세션 · step ·
+          판정 기록과 발화 기록을 지웁니다. 이 키로 보내는 요청은 바로
+          거절됩니다. 되돌릴 수 없습니다.
+        </p>
+        <form
+          className="form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (matches && !busy) onConfirm();
+          }}
+        >
+          <label>
+            확인을 위해 프로젝트 이름을 그대로 입력하세요
+            <input
+              autoFocus
+              value={value}
+              onChange={(e) => onChange(e.target.value)}
+              placeholder={project.name}
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </label>
+          <div className="actions">
+            <button type="button" onClick={onCancel} disabled={busy}>
+              취소
+            </button>
+            <button className="danger" disabled={!matches || busy}>
+              <Trash2 size={15} />
+              {busy ? "삭제 중…" : "프로젝트 삭제"}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

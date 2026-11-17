@@ -682,3 +682,89 @@ test("C-19-9b: step tokens, cumulative bar with STOP, basis lines, utterance exc
     { utterance_log: false, csrf_token: user.csrf_token },
   ]);
 });
+
+test("C-19-9c: delete a project only after typing its name; it leaves the list", async ({
+  page,
+}) => {
+  const writes = [];
+  let projects = [
+    {
+      id: 5,
+      name: "시험 프로젝트",
+      mode: "observe",
+      rule_id: "deadlock-v0.3",
+      provider: "kmu",
+      utterance_log: false,
+    },
+    {
+      id: 6,
+      name: "남길 프로젝트",
+      mode: "block",
+      rule_id: "deadlock-v0.3",
+      provider: "kmu",
+      utterance_log: false,
+    },
+  ];
+  await page.route("**/api/**", async (route) => {
+    const req = route.request();
+    const path = new URL(req.url()).pathname;
+    const respond = (body, status = 200) =>
+      route.fulfill({
+        status,
+        contentType: "application/json",
+        body: JSON.stringify(body),
+      });
+    if (path === "/api/auth/me") return respond(user);
+    if (path === "/api/frontend/reference") return respond(data);
+    if (path === "/api/providers") return respond(providers);
+    if (path === "/api/projects") return respond(projects);
+    if (path === "/api/projects/5/sessions")
+      return respond({ items: [], total: 0, limit: 20, offset: 0 });
+    if (path === "/api/projects/5" && req.method() === "DELETE") {
+      writes.push([req.method(), path, req.postDataJSON()]);
+      projects = projects.filter((p) => p.id !== 5);
+      return respond({ id: 5, deleted: true, revoked_api_keys: 2 });
+    }
+    return respond({ detail: "Not found" }, 404);
+  });
+  await page.goto("/#projects");
+  await page.getByRole("button", { name: /시험 프로젝트/ }).click();
+  await page
+    .getByRole("button", { name: "프로젝트 삭제", exact: true })
+    .click();
+  const dialog = page.getByRole("dialog", { name: "프로젝트를 삭제할까요?" });
+  await expect(dialog).toBeVisible();
+  const confirm = dialog.getByRole("button", { name: "프로젝트 삭제" });
+  await expect(confirm).toBeDisabled();
+  const field = dialog.getByLabel(
+    "확인을 위해 프로젝트 이름을 그대로 입력하세요",
+  );
+  await field.fill("시험 프로젝");
+  await expect(confirm).toBeDisabled();
+  await field.fill("시험 프로젝트 ");
+  await expect(confirm).toBeDisabled();
+  await dialog.getByRole("button", { name: "취소" }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(writes).toEqual([]);
+  await page
+    .getByRole("button", { name: "프로젝트 삭제", exact: true })
+    .click();
+  await expect(confirm).toBeDisabled(); // the typed name does not carry over
+  await field.fill("시험 프로젝트");
+  await expect(confirm).toBeEnabled();
+  await confirm.click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole("status")).toContainText(
+    "'시험 프로젝트' 프로젝트를 삭제했습니다.",
+  );
+  await expect(page.getByRole("button", { name: /시험 프로젝트/ })).toHaveCount(
+    0,
+  );
+  await expect(
+    page.getByRole("button", { name: /남길 프로젝트/ }),
+  ).toBeVisible();
+  await expect(page.getByText("프로젝트 모드")).toHaveCount(0);
+  expect(writes).toEqual([
+    ["DELETE", "/api/projects/5", { csrf_token: user.csrf_token }],
+  ]);
+});

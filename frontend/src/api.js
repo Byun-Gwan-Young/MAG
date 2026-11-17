@@ -51,6 +51,14 @@ export const patch = (path, body) =>
     body: JSON.stringify(body),
   });
 
+// C-19-9c: DELETE /api/projects/{id} (the CSRF token goes in the body, like every other write).
+export const remove = (path, body) =>
+  request(path, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
 // C-19-10 (DM-114): sign out with the per-session CSRF token /api/auth/me returned.
 // The token stays in memory only; never copy it to storage or logs.
 export async function logout(csrfToken) {

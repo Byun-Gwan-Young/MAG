@@ -205,6 +205,73 @@ class StoragePostgresIntegration(unittest.TestCase):
         accounts.revoke_api_key(key_info["id"], self.user_id)
         self.assertIsNone(accounts.verify_api_key(raw_key))
 
+    def test_c19_9c_revoked_keys_leave_the_list_and_project_delete(self):
+        """C-19-9c : live-only key list ; delete_project revokes the keys (rows kept), deletes the project's
+        sessions · child rows · utterances · scenarios, leaves another project alone, and hides the project."""
+        accounts.allow_email(self.email)
+        self.user_id = accounts.upsert_user_from_google(self.google_sub, self.email, "Integration User")["id"]
+        with patch.dict(os.environ, {accounts.DEFAULT_PROVIDER_ENV: "openai"}, clear=False):
+            self.project_id = accounts.create_project(self.user_id, self.project_name, "observe")["id"]
+            other_id = accounts.create_project(self.user_id, self.project_name + "-other", "observe")["id"]
+        try:
+            raw_live, live_key = accounts.issue_api_key(self.project_id, self.user_id, "live")
+            _, old_key = accounts.issue_api_key(self.project_id, self.user_id, "old")
+            raw_other, _ = accounts.issue_api_key(other_id, self.user_id, "other")
+            accounts.revoke_api_key(old_key["id"], self.user_id)
+            self.assertEqual([k["id"] for k in accounts.list_api_keys(self.project_id, self.user_id)],
+                             [live_key["id"]])
+
+            accounts.set_project_utterance_log(self.project_id, self.user_id, True)
+            for project_id, session_id in ((self.project_id, self.session_id), (other_id, self.session_id + "-o")):
+                live.ensure_live_scenario(project_id, self.scenario_key, self.scenario_hash, "s", {"k": 1})
+                live.start_live_session(project_id, session_id, self.scenario_key, self.scenario_hash, "observe",
+                                        "integration-model", {"temperature": 0})
+                live.add_observation(session_id, 1, "developer", {"tests_passed": 1, "state": "structured"})
+                live.add_llm_call(session_id, 1, 1, "developer", 10, 2, 0, 12.5, 200, 0, 0)
+            self.assertTrue(live.add_utterance(self.session_id, 1, 1, "developer", "응답 앞부분"))
+
+            result = accounts.delete_project(self.project_id, self.user_id)
+            self.assertEqual(result["revoked_api_keys"], 1)
+            self.assertEqual({k: result["deleted"][k] for k in ("utterances", "llm_calls", "observations",
+                                                                 "sessions", "scenarios")},
+                             {"utterances": 1, "llm_calls": 1, "observations": 1, "sessions": 1, "scenarios": 1})
+            self.assertIsNone(accounts.verify_api_key(raw_live))
+            self.assertEqual(accounts.verify_api_key(raw_other)["id"], other_id)
+            self.assertEqual([p["id"] for p in accounts.list_projects(self.user_id) if not p["read_only"]],
+                             [other_id])
+            for call in (lambda: accounts.list_api_keys(self.project_id, self.user_id),
+                         lambda: accounts.delete_project(self.project_id, self.user_id),
+                         lambda: live.ensure_live_scenario(self.project_id, "X", "y", "s", {}),
+                         lambda: live.start_live_session(self.project_id, "c199c-new", self.scenario_key,
+                                                         self.scenario_hash, "observe", "m", {})):
+                with self.assertRaises(LookupError):
+                    call()
+            with get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("SELECT COUNT(*), COUNT(revoked_at) FROM api_keys WHERE project_id = %s",
+                                   (self.project_id,))
+                    self.assertEqual(cursor.fetchone(), (2, 2))          # both key records kept, both revoked
+                    cursor.execute("SELECT deleted_at IS NOT NULL, utterance_log FROM projects WHERE id = %s",
+                                   (self.project_id,))
+                    self.assertEqual(cursor.fetchone(), (True, False))
+                    cursor.execute("SELECT COUNT(*) FROM sessions WHERE id = %s", (self.session_id,))
+                    self.assertEqual(cursor.fetchone()[0], 0)
+                    cursor.execute("SELECT COUNT(*) FROM observations WHERE session_id = %s",
+                                   (self.session_id + "-o",))
+                    self.assertEqual(cursor.fetchone()[0], 1)            # the other project's records stay
+                    cursor.execute("SELECT detail FROM auth_events WHERE user_id = %s AND kind = 'project_deleted'",
+                                   (self.user_id,))
+                    self.assertEqual([r[0]["name"] for r in cursor.fetchall()], [self.project_name])
+        finally:
+            with get_connection() as conn:
+                with conn.cursor() as cursor:
+                    for table in ("llm_calls", "observations", "judgements"):
+                        cursor.execute(f"DELETE FROM {table} WHERE session_id = %s", (self.session_id + "-o",))
+                    cursor.execute("DELETE FROM sessions WHERE id = %s", (self.session_id + "-o",))
+                    cursor.execute("DELETE FROM api_keys WHERE project_id = %s", (other_id,))
+                    cursor.execute("DELETE FROM scenarios WHERE project_id = %s", (other_id,))
+                    cursor.execute("DELETE FROM projects WHERE id = %s", (other_id,))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

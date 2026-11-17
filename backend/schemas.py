@@ -108,6 +108,13 @@ class ApiKeyRevokeResponse(BaseModel):
     revoked: bool
 
 
+class ProjectDeleteResponse(BaseModel):
+    """C-19-9c : DELETE /api/projects/{id}. Counts only (how many keys were revoked)."""
+    id: int
+    deleted: bool
+    revoked_api_keys: int
+
+
 class SessionDetailResponse(BaseModel):
     id: str
     scenario_id: int

@@ -1208,7 +1208,7 @@ def list_projects(user_id):
                     id, name, mode, rule_id, provider, upstream_url,
                     owner_user_id, read_only, created_at, utterance_log
                 FROM projects
-                WHERE owner_user_id = %s
+                WHERE (owner_user_id = %s AND deleted_at IS NULL)
                    OR (owner_user_id IS NULL AND read_only = TRUE)
                 ORDER BY read_only DESC, id
                 """,
@@ -1227,6 +1227,7 @@ def _owned_project(cursor, project_id, user_id):
         WHERE id = %s
           AND owner_user_id = %s
           AND read_only = FALSE
+          AND deleted_at IS NULL
         """,
         (project_id, user_id),
     )
@@ -1353,6 +1354,124 @@ def set_project_provider(project_id, user_id, provider, upstream_url=None):
             return updated
 
 
+def delete_project(project_id, user_id):
+    """C-19-9c (DM-121) : delete one of the caller's own writable projects, in one transaction.
+
+    ① every key of the project is revoked (the gateway refuses it from the commit on) — the key rows themselves
+    (prefix, digest, revoked_at) stay for the audit trail ; ② the project's utterances, LLM calls, judgements,
+    observations, sessions and scenarios are deleted, the same statements as purge_account scoped to one project ;
+    ③ one ``project_deleted`` auth event (project id and name, counts only, no content). The project row stays as a
+    tombstone with ``deleted_at`` set, because api_keys.project_id points at it ; every project query skips it, and
+    purge_account still removes it (and its key rows) with the account.
+
+    Someone else's, the demo project, a deleted or a missing project are the same LookupError (the API checks the
+    demo project first and answers 403). Returns {"project_id", "name", "revoked_api_keys", "deleted"}.
+    """
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            _require_active_account_cursor(cursor, user_id, lock=True)
+            # Lock the project row : live session starts read it FOR SHARE (storage.live), so a start either commits
+            # before this delete (and its session is deleted below) or waits and then finds no project.
+            cursor.execute(
+                """
+                SELECT id, name
+                FROM projects
+                WHERE id = %s
+                  AND owner_user_id = %s
+                  AND read_only = FALSE
+                  AND deleted_at IS NULL
+                FOR UPDATE
+                """,
+                (project_id, user_id),
+            )
+            project = _row_dict(cursor, cursor.fetchone())
+            if project is None:
+                # Deliberately do not distinguish "not found" from "not yours".
+                raise LookupError("project not found")
+
+            cursor.execute(
+                """
+                UPDATE api_keys
+                SET revoked_at = CURRENT_TIMESTAMP
+                WHERE project_id = %s
+                  AND revoked_at IS NULL
+                RETURNING id
+                """,
+                (project_id,),
+            )
+            revoked = len(cursor.fetchall())
+
+            # Lock the project's sessions before deleting their child rows : live writers lock the session row first.
+            cursor.execute(
+                """
+                SELECT s.id
+                FROM sessions AS s
+                JOIN scenarios AS sc
+                  ON sc.id = s.scenario_id
+                WHERE sc.project_id = %s
+                ORDER BY s.id
+                FOR UPDATE OF s
+                """,
+                (project_id,),
+            )
+            cursor.fetchall()
+
+            deleted = {}
+            for table in ("utterances", "llm_calls", "judgements", "observations"):
+                cursor.execute(
+                    f"""
+                    DELETE FROM {table} AS t
+                    USING sessions AS s,
+                          scenarios AS sc
+                    WHERE t.session_id = s.id
+                      AND s.scenario_id = sc.id
+                      AND sc.project_id = %s
+                    """,
+                    (project_id,),
+                )
+                deleted[table] = cursor.rowcount
+
+            cursor.execute(
+                """
+                DELETE FROM sessions AS s
+                USING scenarios AS sc
+                WHERE s.scenario_id = sc.id
+                  AND sc.project_id = %s
+                """,
+                (project_id,),
+            )
+            deleted["sessions"] = cursor.rowcount
+
+            cursor.execute(
+                """
+                DELETE FROM scenarios
+                WHERE project_id = %s
+                """,
+                (project_id,),
+            )
+            deleted["scenarios"] = cursor.rowcount
+
+            cursor.execute(
+                """
+                UPDATE projects
+                SET deleted_at = CURRENT_TIMESTAMP,
+                    utterance_log = FALSE
+                WHERE id = %s
+                """,
+                (project_id,),
+            )
+
+            _record_auth_event_cursor(
+                cursor,
+                "project_deleted",
+                user_id,
+                {"project_id": project_id, "name": project["name"], "revoked_api_keys": revoked,
+                 "deleted": deleted},
+            )
+            return {"project_id": project_id, "name": project["name"], "revoked_api_keys": revoked,
+                    "deleted": deleted}
+
+
 def _api_key_digest(raw_key: str) -> str:
     return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
 
@@ -1464,6 +1583,7 @@ def revoke_api_key(key_id, user_id):
                 WHERE k.id = %s
                   AND p.owner_user_id = %s
                   AND p.read_only = FALSE
+                  AND p.deleted_at IS NULL
                 """,
                 (key_id, user_id),
             )
@@ -1523,6 +1643,7 @@ def verify_api_key(raw_key):
                 LEFT JOIN users u ON u.id = p.owner_user_id
                 WHERE k.key_prefix = %s
                   AND (p.owner_user_id IS NULL OR u.account_status = 'active')
+                  AND p.deleted_at IS NULL
                 ORDER BY k.id
                 """,
                 (prefix,),

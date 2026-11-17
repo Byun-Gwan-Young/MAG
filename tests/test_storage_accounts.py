@@ -48,7 +48,7 @@ class FakeCursor:
         if "SELECT id, name, mode, rule_id, upstream_url, owner_user_id, read_only, created_at FROM projects" in q:
             project_id, user_id = params
             p = self.state["projects"].get(project_id)
-            if p and p["owner_user_id"] == user_id and not p["read_only"]:
+            if p and p["owner_user_id"] == user_id and not p["read_only"] and p.get("deleted_at") is None:
                 self._set_rows(
                     ["id", "name", "mode", "rule_id", "upstream_url", "owner_user_id", "read_only", "created_at"],
                     [(
@@ -103,6 +103,8 @@ class FakeCursor:
                 if key["key_prefix"] != prefix:
                     continue
                 p = self.state["projects"][key["project_id"]]
+                if p.get("deleted_at") is not None:   # C-19-9c : AND p.deleted_at IS NULL
+                    continue
                 owner_user_id = p["owner_user_id"]
                 if owner_user_id is not None:
                     user = self.state["users"].get(owner_user_id)
@@ -145,7 +147,7 @@ class FakeCursor:
             key = self.state["api_keys"].get(key_id)
             if key:
                 p = self.state["projects"][key["project_id"]]
-                if p["owner_user_id"] == user_id and not p["read_only"]:
+                if p["owner_user_id"] == user_id and not p["read_only"] and p.get("deleted_at") is None:
                     self._set_rows(["id", "project_id"], [(key_id, key["project_id"])])
                     return
             self._set_rows(["id", "project_id"], [])

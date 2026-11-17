@@ -387,12 +387,13 @@ class UtteranceSettingCursor(KeysFakeCursor):
 
     def execute(self, sql, params=()):
         q = ' '.join(sql.split())
-        if 'FROM projects WHERE owner_user_id = %s OR (owner_user_id IS NULL AND read_only = TRUE)' in q:
+        if 'FROM projects WHERE (owner_user_id = %s AND deleted_at IS NULL) OR (owner_user_id IS NULL AND read_only = TRUE)' in q:
             columns = ['id', 'name', 'mode', 'rule_id', 'provider', 'upstream_url', 'owner_user_id', 'read_only',
                        'created_at', 'utterance_log']
             rows = [tuple(p.get(c, False if c == 'utterance_log' else 'kmu') for c in columns)
                     for p in sorted(self.state['projects'].values(), key=lambda p: (not p['read_only'], p['id']))
-                    if p['owner_user_id'] == params[0] or (p['owner_user_id'] is None and p['read_only'])]
+                    if (p['owner_user_id'] == params[0] and p.get('deleted_at') is None)
+                    or (p['owner_user_id'] is None and p['read_only'])]
             self._set_rows(columns, rows)
             return
         if q.startswith('UPDATE projects SET utterance_log = %s WHERE id = %s'):

@@ -122,13 +122,14 @@ def _require_writable_project(cursor, project_id: int, *, lock: bool = True):
         f"""
         SELECT id, mode, read_only, provider, owner_user_id
         FROM projects
-        WHERE id = %s{lock_clause}
+        WHERE id = %s
+          AND deleted_at IS NULL{lock_clause}
         """,
         (project_id,),
     )
     row = cursor.fetchone()
     if row is None or row[2]:
-        # A read-only demo project must not receive live traffic.
+        # A read-only demo project must not receive live traffic ; a deleted project (C-19-9c) is not found.
         raise LookupError("project not found")
     return {
     "id": row[0],

@@ -28,14 +28,16 @@ class KeysFakeCursor(FakeCursor):
 
     def execute(self, sql, params=()):
         q = " ".join(sql.split())
-        if "FROM projects WHERE owner_user_id = %s OR (owner_user_id IS NULL AND read_only = TRUE)" in q:
+        # C-19-9c : a deleted project (deleted_at set) is no longer listed.
+        if "FROM projects WHERE (owner_user_id = %s AND deleted_at IS NULL) OR (owner_user_id IS NULL AND read_only = TRUE)" in q:
             self.state.setdefault("executed_sql", []).append(q)
             user_id = params[0]
             columns = ["id", "name", "mode", "rule_id", "provider", "upstream_url", "owner_user_id", "read_only",
                        "created_at"]
             rows = [tuple(p.get(c, "kmu") for c in columns) for p in sorted(self.state["projects"].values(),
                                                                              key=lambda p: (not p["read_only"], p["id"]))
-                    if p["owner_user_id"] == user_id or (p["owner_user_id"] is None and p["read_only"])]
+                    if (p["owner_user_id"] == user_id and p.get("deleted_at") is None)
+                    or (p["owner_user_id"] is None and p["read_only"])]
             self._set_rows(columns, rows)
             return
         if "FROM api_keys WHERE project_id = %s AND revoked_at IS NULL ORDER BY created_at DESC, id DESC" in q:
