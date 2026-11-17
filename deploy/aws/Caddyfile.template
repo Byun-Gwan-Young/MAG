@@ -4,6 +4,9 @@
 # DM-109 : no shared site password any more. DM-110 : the whole site is behind Google sign-in (forward_auth below) ;
 # only the sign-in page, the sign-in API and the sign-in page's own JS · CSS open without it.
 # C-19-10 (DM-111 · DM-114) : the screen is the React build (site/, a single-page app) ; /login is React too.
+# C-19-11 (DM-122) : the three services run in two slots (a : 8020 · 8030 · 8050, b : 8021 · 8031 · 8051). caddy.env names
+# the slot in use ({$GUARDRAIL_*_UPSTREAM}, written by slots.sh) ; a deploy starts the other slot, checks it, rewrites
+# those three lines and reloads Caddy (no dropped connection). Without the lines : slot a's ports.
 
 {$GUARDRAIL_DOMAIN} {
 	# HTTPS : Caddy gets the certificate for the domain by itself.
@@ -23,7 +26,7 @@
 	# backend's 303 to /login goes back to the browser. forward_auth runs before the handle blocks. ---
 	# C-19-9 : the service gateway paths (below) are protected by the MAG API key the gateway itself checks, not by sign-in.
 	@gated not path /login /api/auth/* /assets/* /v1/* /sessions /sessions/* /log /conditions
-	forward_auth @gated 127.0.0.1:8030 {
+	forward_auth @gated {$GUARDRAIL_BACKEND_UPSTREAM:127.0.0.1:8030} {
 		uri /api/auth/check
 	}
 
@@ -32,7 +35,7 @@
 	# C-19-9 : /api/live/* is the live dashboard (the user's gateway sessions from the DB).
 	@backend path /api/auth/* /api/projects /api/projects/* /api/keys/* /api/providers /api/live/*
 	handle @backend {
-		reverse_proxy 127.0.0.1:8030
+		reverse_proxy {$GUARDRAIL_BACKEND_UPSTREAM:127.0.0.1:8030}
 	}
 
 	# --- C-19-10 : the frozen reference data the React screen reads (built into the bundle by bundle.py) ---
@@ -46,7 +49,7 @@
 	# --- query API (C-19-6, read-only, 127.0.0.1:8020) : only these paths go to the API ---
 	@api path /api/* /docs /redoc /openapi.json
 	handle @api {
-		reverse_proxy 127.0.0.1:8020
+		reverse_proxy {$GUARDRAIL_API_UPSTREAM:127.0.0.1:8020}
 	}
 
 	# --- C-19-9 : service gateway (service/gateway.py, 127.0.0.1:8050). The customer's agent calls /v1/chat/completions
@@ -59,7 +62,9 @@
 		request_body {
 			max_size 8MB
 		}
-		reverse_proxy 127.0.0.1:8050 {
+		# C-19-11 : only a gateway marks a request it hands to the other slot ; a caller cannot.
+		request_header -X-Guardrail-Peer
+		reverse_proxy {$GUARDRAIL_GATEWAY_UPSTREAM:127.0.0.1:8050} {
 			transport http {
 				dial_timeout 10s
 				response_header_timeout 660s

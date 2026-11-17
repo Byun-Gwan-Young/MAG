@@ -28,8 +28,10 @@ AWS = ROOT / 'deploy' / 'aws'
 sys.path.insert(0, str(AWS))
 import bundle  # noqa: E402
 
-MAC_SCRIPTS = ('provision.sh', 'teardown.sh', 'configure.sh', 'remote.sh', 'deploy.sh', 'lib.sh', 'set-google-client.sh')
-SERVER_SCRIPTS = ('server-setup.sh', 'remote-install.sh')
+MAC_SCRIPTS = ('provision.sh', 'teardown.sh', 'configure.sh', 'remote.sh', 'deploy.sh', 'lib.sh', 'set-google-client.sh',
+               'ci-setup.sh')
+SERVER_SCRIPTS = ('server-setup.sh', 'remote-install.sh', 'slots.sh', 'guardrail-deploy.sh', 'deploy-user-setup.sh',
+                  'ci-runner-access.sh', 'ci-send.sh')   # C-19-11 : the last two run on the GitHub runner
 ACCOUNT = '123456789012'
 CREATE_VERBS = ('create-', 'run-instances', 'allocate-address', 'associate-address', 'authorize-', 'revoke-',
                 'change-resource-record-sets', 'start-instances', 'terminate-', 'delete-', 'release-', 'disassociate-')
@@ -113,9 +115,11 @@ class CaddyAndUnit(unittest.TestCase):
 
     def test_only_the_api_paths_go_to_the_api(self):
         self.assertEqual(re.findall(r'^@api path (.+)$', self.code, re.M), ['/api/* /docs /redoc /openapi.json'])
-        self.assertEqual(re.findall(r'reverse_proxy (\S+)', self.code), ['127.0.0.1:8030', '127.0.0.1:8020',
-                                                                         '127.0.0.1:8050'])
-        self.assertIn('handle @api {\nreverse_proxy 127.0.0.1:8020\n}', self.code)
+        # C-19-11 : each upstream is the slot in use (caddy.env, written by slots.sh), slot a's port without it.
+        self.assertEqual(re.findall(r'reverse_proxy (\S+)', self.code), ['{$GUARDRAIL_BACKEND_UPSTREAM:127.0.0.1:8030}', '{$GUARDRAIL_API_UPSTREAM:127.0.0.1:8020}', '{$GUARDRAIL_GATEWAY_UPSTREAM:127.0.0.1:8050}'])
+        self.assertIn('handle @api {\nreverse_proxy {$GUARDRAIL_API_UPSTREAM:127.0.0.1:8020}\n}', self.code)
+        self.assertEqual(set(re.findall(r'127\.0\.0\.1:\d+', self.code)),
+                         {'127.0.0.1:8020', '127.0.0.1:8030', '127.0.0.1:8050'})
 
     def test_gateway_paths_go_to_the_gateway_with_the_long_timeout(self):
         # C-19-9 : the key-protected gateway paths, before the catch-all screen ; Caddy waits longer than the proxy's
@@ -124,7 +128,7 @@ class CaddyAndUnit(unittest.TestCase):
                          ['/v1/* /sessions /sessions/* /log /conditions'])
         block = self.code[self.code.index('handle @gateway {'):self.code.index('handle /assets/*')]
         self.assertIn('request_body {\nmax_size 8MB\n}', block)
-        self.assertIn('reverse_proxy 127.0.0.1:8050 {\ntransport http {', block)
+        self.assertIn('request_header -X-Guardrail-Peer\nreverse_proxy {$GUARDRAIL_GATEWAY_UPSTREAM:127.0.0.1:8050} {\ntransport http {', block)
         timeouts = dict(re.findall(r'^(response_header_timeout|read_timeout|write_timeout) (\d+)s$', block, re.M))
         self.assertEqual(set(timeouts), {'response_header_timeout', 'read_timeout', 'write_timeout'})
         self.assertTrue(all(int(v) >= 600 for v in timeouts.values()), timeouts)
@@ -135,7 +139,7 @@ class CaddyAndUnit(unittest.TestCase):
         # DM-110 : forward_auth on every path except the sign-in page, the sign-in API and (C-19-10) the built JS · CSS
         # the React sign-in page loads. Data (/records.json, /reference.json, /api/frontend/reference) stays gated.
         self.assertEqual(re.findall(r'^@gated (.+)$', self.code, re.M), ['not path /login /api/auth/* /assets/* /v1/* /sessions /sessions/* /log /conditions'])
-        self.assertIn('forward_auth @gated 127.0.0.1:8030 {\nuri /api/auth/check\n}', self.code)
+        self.assertIn('forward_auth @gated {$GUARDRAIL_BACKEND_UPSTREAM:127.0.0.1:8030} {\nuri /api/auth/check\n}', self.code)
         self.assertLess(self.code.index('forward_auth'), self.code.index('handle @backend'))
 
     def test_only_the_sign_in_paths_go_to_the_backend_before_the_api(self):
@@ -143,7 +147,7 @@ class CaddyAndUnit(unittest.TestCase):
         # C-19-10 : /login is the React screen now, not the backend template.
         self.assertEqual(re.findall(r'^@backend path (.+)$', self.code, re.M),
                          ['/api/auth/* /api/projects /api/projects/* /api/keys/* /api/providers /api/live/*'])   # C-19-8K, C-19-8P, C-19-9
-        self.assertIn('handle @backend {\nreverse_proxy 127.0.0.1:8030\n}', self.code)
+        self.assertIn('handle @backend {\nreverse_proxy {$GUARDRAIL_BACKEND_UPSTREAM:127.0.0.1:8030}\n}', self.code)
         self.assertLess(self.code.index('handle @backend'), self.code.index('handle @api'))
         for header in ('Strict-Transport-Security', 'X-Content-Type-Options', 'X-Frame-Options', 'Referrer-Policy'):
             self.assertIn(header, self.code)
@@ -165,32 +169,37 @@ class CaddyAndUnit(unittest.TestCase):
         self.assertLess(self.code.index('handle /api/frontend/reference'), self.code.index('handle @api'))
 
     def test_api_unit(self):
-        unit = (AWS / 'guardrail-api.service').read_text(encoding='utf-8')
-        for line in ('User=guardrail', 'WorkingDirectory=/opt/guardrail/app', 'EnvironmentFile=/etc/guardrail/api.env',
-                     'Restart=always',
-                     'ExecStart=/opt/guardrail/venv/bin/python -B -m service.api --host 127.0.0.1 --port 8020'):
+        # C-19-11 : template units, one instance per slot ; the slot's release and ports come from slots.sh.
+        unit = (AWS / 'guardrail-api@.service').read_text(encoding='utf-8')
+        for line in ('User=guardrail', 'WorkingDirectory=/opt/guardrail/slots/%i', 'EnvironmentFile=/etc/guardrail/api.env',
+                     'EnvironmentFile=/etc/guardrail/slot-%i.env', 'Restart=always',
+                     'ExecStart=/opt/guardrail/venv/bin/python -B -m service.api --host 127.0.0.1 '
+                     '--port ${GUARDRAIL_API_PORT}'):
             self.assertIn(line + '\n', unit)
 
     def test_backend_unit(self):
-        unit = (AWS / 'guardrail-backend.service').read_text(encoding='utf-8')
-        for line in ('User=guardrail', 'WorkingDirectory=/opt/guardrail/app', 'EnvironmentFile=/etc/guardrail/backend.env',
-                     'Restart=always', 'ProtectSystem=strict',
+        unit = (AWS / 'guardrail-backend@.service').read_text(encoding='utf-8')
+        for line in ('User=guardrail', 'WorkingDirectory=/opt/guardrail/slots/%i', 'EnvironmentFile=/etc/guardrail/backend.env',
+                     'EnvironmentFile=/etc/guardrail/slot-%i.env', 'Restart=always', 'ProtectSystem=strict',
                      'ExecStart=/opt/guardrail/venv/bin/python -B -m uvicorn backend.main:app --host 127.0.0.1 '
-                     '--port 8030 --workers 1'):
+                     '--port ${GUARDRAIL_BACKEND_PORT} --workers 1'):
             self.assertIn(line + '\n', unit)
 
     def test_gateway_unit(self):
         # C-19-9 : loopback, one worker, the backend's env file (same DB URL and provider settings).
-        unit = (AWS / 'guardrail-gateway.service').read_text(encoding='utf-8')
-        for line in ('User=guardrail', 'WorkingDirectory=/opt/guardrail/app', 'EnvironmentFile=/etc/guardrail/backend.env',
-                     'Restart=always', 'ProtectSystem=strict', 'PrivateTmp=true',
-                     'ExecStart=/opt/guardrail/venv/bin/python -B -m service.gateway --host 127.0.0.1 --port 8050'):
+        unit = (AWS / 'guardrail-gateway@.service').read_text(encoding='utf-8')
+        for line in ('User=guardrail', 'WorkingDirectory=/opt/guardrail/slots/%i', 'EnvironmentFile=/etc/guardrail/backend.env',
+                     'EnvironmentFile=/etc/guardrail/slot-%i.env', 'Restart=always', 'ProtectSystem=strict', 'PrivateTmp=true',
+                     'ExecStart=/opt/guardrail/venv/bin/python -B -m service.gateway --host 127.0.0.1 '
+                     '--port ${GUARDRAIL_GATEWAY_PORT}'):
             self.assertIn(line + '\n', unit)
-        install = (AWS / 'remote-install.sh').read_text(encoding='utf-8')
-        self.assertIn('install -m 644 "$release/deploy/aws/guardrail-gateway.service" '
-                      '/etc/systemd/system/guardrail-gateway.service', install)
-        self.assertIn('systemctl restart guardrail-gateway', install)
-        self.assertIn('curl -fsS -o /dev/null http://127.0.0.1:8050/healthz ||', install)
+        # C-19-11 : slots.sh installs the units, starts the idle slot and asks each service on its own port
+        # (tests/test_c19_11_slots.py runs it). The single units of before are gone from the repository.
+        slots = (AWS / 'slots.sh').read_text(encoding='utf-8')
+        self.assertIn('install -m 644 "$SELF_DIR/guardrail-$service@.service" "$UNITS/guardrail-$service@.service"', slots)
+        self.assertIn('wait_http "http://127.0.0.1:$GATEWAY_PORT/healthz"', slots)
+        self.assertEqual(sorted(p.name for p in AWS.glob('*.service')),
+                         ['guardrail-api@.service', 'guardrail-backend@.service', 'guardrail-gateway@.service'])
 
     def test_server_db_url_is_a_socket_without_password(self):
         url = 'postgresql:///guardrail_demo?host=/var/run/postgresql'
@@ -215,7 +224,8 @@ class Scripts(unittest.TestCase):
     def test_no_target_value_or_secret_in_deploy_files(self):
         allowed_ips = {'0.0.0.0', '127.0.0.1'}
         # C-19-8K : the school gateway is the demo's public upstream (guardrail-deadlock-v0.3-kmu.yaml), not a target value.
-        allowed_hosts = {'checkip.amazonaws.com', 'dl.cloudsmith.io', 'demo.example.com', 'factchat.mindlogic-kr-api.com'}
+        allowed_hosts = {'checkip.amazonaws.com', 'dl.cloudsmith.io', 'demo.example.com', 'factchat.mindlogic-kr-api.com',
+                         'token.actions.githubusercontent.com', 'sts.amazonaws.com'}   # C-19-11 : GitHub OIDC names
         for path in sorted(AWS.iterdir()):
             if path.name == 'target.env' or not path.is_file():
                 continue
@@ -238,20 +248,22 @@ class Scripts(unittest.TestCase):
     def test_remote_install_checks_before_it_switches(self):
         text = (AWS / 'remote-install.sh').read_text(encoding='utf-8')
         order = [text.index(s) for s in ('-m storage init', '-m storage demo-all', '-m service.load_demo check',
-                                         'die "check 가 같지 않다', 'ln -sfn "$release"', 'systemctl restart guardrail-api',
-                                         'systemctl restart guardrail-backend', 'systemctl reload-or-restart caddy',
-                                         'http://127.0.0.1:8030/login')]
+                                         'die "check 가 같지 않다', "printf 'GUARDRAIL_DB_URL=%s\\n'",
+                                         'bash "$release/deploy/aws/slots.sh" deploy "$release" "$DOMAIN"')]
         self.assertEqual(order, sorted(order))
-        self.assertIn('caddy validate', text)
-        # C-19-10 : the new Caddyfile is checked in the release folder before it replaces the one in use.
-        self.assertLess(text.index('caddy validate --config "$release/deploy/aws/Caddyfile.template"'),
-                        text.index('install -m 644 "$release/deploy/aws/Caddyfile.template" /etc/caddy/Caddyfile'))
+        # C-19-11 : the switch itself is slots.sh (the release's own copy) ; nothing here restarts a service or Caddy.
+        self.assertNotRegex(text, r'systemctl (restart|reload|stop)|ln -sfn|/etc/caddy')
+        self.assertIn('|| die "새 버전으로 바꾸지 못했다', text)
+        slots = (AWS / 'slots.sh').read_text(encoding='utf-8')
+        # C-19-10 : the new Caddyfile is checked before it replaces the one in use.
+        self.assertLess(slots.index('validate --config "$SELF_DIR/Caddyfile.template"'),
+                        slots.index('install -m 644 "$SELF_DIR/Caddyfile.template" "$CADDYFILE"'))
 
     def test_backend_env_keeps_the_client_id_and_never_a_secret(self):
         text = (AWS / 'remote-install.sh').read_text(encoding='utf-8')
         self.assertIn("printf 'GUARDRAIL_OPEN_SIGNUP=true\\n'", text)            # DM-109
         self.assertNotIn('remote.sh password', text)                           # no site password precondition
-        self.assertIn("-e '^GUARDRAIL_BASIC_AUTH_'", text)                     # old password lines dropped
+        self.assertIn("-e '^GUARDRAIL_BASIC_AUTH_'", (AWS / 'slots.sh').read_text(encoding='utf-8'))   # old password lines dropped
         self.assertIn("printf 'GOOGLE_LOGIN_URI=https://%s/api/auth/google\\n' \"$DOMAIN\"", text)
         self.assertIn("printf 'AUTH_COOKIE_SECURE=true\\n'", text)
         self.assertIn('[[ -n "$CLIENT_ID" ]] || CLIENT_ID=$(sed -n', text)   # an empty argument keeps the server's

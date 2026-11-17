@@ -1,8 +1,11 @@
 # agent-guardrail demo records API (C-19-6, read-only, 127.0.0.1:8020) — systemd unit (C-19-7, DM-91).
-# Installed as /etc/systemd/system/guardrail-api.service by deploy (remote-install.sh).
+# Installed as /etc/systemd/system/guardrail-api@.service by deploy (slots.sh).
+# C-19-11 : a template unit, one instance per slot (guardrail-api@a, guardrail-api@b). The slot's release is the symlink
+# /opt/guardrail/slots/%i and its ports come from /etc/guardrail/slot-%i.env (both written by deploy/aws/slots.sh), so a
+# new version starts beside the running one and Caddy moves to it only after it answers.
 # /etc/guardrail/api.env holds only GUARDRAIL_DB_URL (Unix socket, peer authentication as user guardrail : no password).
 [Unit]
-Description=agent-guardrail demo records API (read-only, 127.0.0.1:8020)
+Description=agent-guardrail demo records API (read-only, loopback), slot %i
 After=network.target postgresql.service
 Wants=postgresql.service
 
@@ -10,9 +13,10 @@ Wants=postgresql.service
 Type=simple
 User=guardrail
 Group=guardrail
-WorkingDirectory=/opt/guardrail/app
+WorkingDirectory=/opt/guardrail/slots/%i
 EnvironmentFile=/etc/guardrail/api.env
-ExecStart=/opt/guardrail/venv/bin/python -B -m service.api --host 127.0.0.1 --port 8020
+EnvironmentFile=/etc/guardrail/slot-%i.env
+ExecStart=/opt/guardrail/venv/bin/python -B -m service.api --host 127.0.0.1 --port ${GUARDRAIL_API_PORT}
 Restart=always
 RestartSec=3
 NoNewPrivileges=true

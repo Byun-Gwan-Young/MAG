@@ -1,0 +1,94 @@
+# C-19-11 part 2 · 2b (DM-119, DM-122) : deploy main to the server from a GitHub runner, with no downtime.
+# On every push to main, and by hand (Actions → Deploy → Run workflow, main only) :
+#   ci      the offline checks of ci.yml on this commit. Failed = no deploy.
+#   deploy  1. React build and the server bundle (deploy/aws/bundle.py : committed files only, checked for keys).
+#           2. An AWS role through GitHub OIDC (no long-lived AWS key anywhere). Its only permission : add and remove an
+#              inbound rule of the server's security group.
+#           3. This runner's IP/32 is opened on port 22 (deploy/aws/ci-runner-access.sh open) ...
+#           4. ... the bundle goes to the server's deploy-only account, whose one allowed command installs it
+#              (deploy/aws/guardrail-deploy.sh -> remote-install.sh -> slots.sh : the new version starts in the idle
+#              slot, is checked, and only then Caddy moves to it ; a failed check leaves the version in use and fails
+#              this job) ...
+#           5. ... and the rule is removed again, also when a step before it failed (if: always()).
+# Secrets and variables are read by name only (the PM registers the values : reports/c19-11/pm-commands.md). Nothing
+# here prints one : no `set -x`, GitHub masks secrets in the log, and the runner IP is masked before its first use.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production      # one deploy at a time ; a second one waits
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  deploy:
+    name: Build, send, switch
+    needs: ci
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: production
+    permissions:
+      contents: read
+      id-token: write           # GitHub OIDC token for the AWS role
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: React build
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          cache: pip
+      - name: Packages (pinned)
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Server bundle (committed files only, checked)
+        run: |
+          python -B deploy/aws/bundle.py build --ref HEAD --out "$RUNNER_TEMP/bundle" > "$RUNNER_TEMP/bundle-summary.json" \
+            || { python -c 'import json, sys; print("\n".join(json.load(open(sys.argv[1]))["problems"]))' "$RUNNER_TEMP/bundle-summary.json"; exit 1; }
+          python -c 'import json, sys; s = json.load(open(sys.argv[1])); print("commit", s["commit"][:12], "files", s["files"], "bundle bytes", s["bundle_bytes"])' "$RUNNER_TEMP/bundle-summary.json"
+      - name: AWS role (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: mag-deploy-${{ github.run_id }}
+          role-duration-seconds: 1800
+      - name: Open port 22 for this runner only
+        env:
+          AWS_SECURITY_GROUP_ID: ${{ secrets.AWS_SECURITY_GROUP_ID }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: bash deploy/aws/ci-runner-access.sh open
+      - name: Send the bundle and switch (no downtime)
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: bash deploy/aws/ci-send.sh "$RUNNER_TEMP/bundle/bundle.tar.gz"
+      - name: Close port 22 again
+        if: always()
+        env:
+          AWS_SECURITY_GROUP_ID: ${{ secrets.AWS_SECURITY_GROUP_ID }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: bash deploy/aws/ci-runner-access.sh close

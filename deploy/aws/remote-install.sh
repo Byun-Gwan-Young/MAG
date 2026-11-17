@@ -8,14 +8,15 @@
 # 2. From that release, as user guardrail (peer authentication) : `python -m storage init`, `python -m storage demo-all`,
 #    `python -m service.load_demo check` (the merged loader). The check result stays in /opt/guardrail/checks/. If any
 #    check differs (or a step fails) the script stops HERE : the running API and site keep the previous release.
-# 3. Point /opt/guardrail/app at the release, install the API unit and the Caddyfile, restart the API, reload Caddy,
-#    and wait for the API on 127.0.0.1:8020. The three newest releases are kept.
-# 4. DM-108 : the service backend (backend/, Google sign-in) on 127.0.0.1:8030 : /etc/guardrail/backend.env (DB URL,
-#    sign-in URI on DOMAIN, secure cookie, and GOOGLE_CLIENT_ID when given ; an empty argument keeps the one already
-#    on the server), its unit, restart, and wait for /login. Without a client ID the page says it is not set up yet.
+# 3. DM-108 : /etc/guardrail/backend.env for the service backend and the gateway (DB URL, sign-in URI on DOMAIN, secure
+#    cookie, and GOOGLE_CLIENT_ID when given ; an empty argument keeps the one already on the server).
 #    C-19-8K : also GUARDRAIL_DEFAULT_PROVIDER (kmu) and GUARDRAIL_PROVIDER_KMU_URL ; values already there are kept.
-# 5. C-19-9 : the service gateway (service/gateway.py) on 127.0.0.1:8050, reading the same backend.env : its unit,
-#    restart, and wait for /healthz. Caddy sends /v1/*, /sessions*, /log and /conditions to it.
+# 4. C-19-11 (DM-122) : the switch is the release's own deploy/aws/slots.sh — the query API, the backend and the
+#    gateway start in the idle slot (a : 8020 · 8030 · 8050, b : 8021 · 8031 · 8051) beside the version in use ; only when
+#    all three answer does Caddy move to them (reload, no dropped connection) ; a failed check leaves the version in
+#    use untouched and ends with 1. The old gateway stays until its sessions are over. The release in use and the two
+#    before it are kept (slots.sh rollback).
+# The same script serves the PM's deploy.sh and the GitHub deploy (the server's guardrail-deploy command).
 set -euo pipefail
 
 BUNDLE=${1:-}
@@ -24,7 +25,6 @@ CLIENT_ID=${3:-}
 DB_URL='postgresql:///guardrail_demo?host=/var/run/postgresql'
 PY=/opt/guardrail/venv/bin/python
 CHECKS=/opt/guardrail/checks
-CADDY_ENV=/etc/guardrail/caddy.env
 BACKEND_ENV=/etc/guardrail/backend.env
 export UV_PYTHON_INSTALL_DIR=/opt/guardrail/python
 
@@ -70,14 +70,7 @@ if (( status != 0 )); then
 fi
 printf 'check : 모두 같음 (%s)\n' "$result"
 
-step "전환 : /opt/guardrail/app → 이 릴리스, API 재시작"
-ln -sfn "$release" /opt/guardrail/app.next && mv -T /opt/guardrail/app.next /opt/guardrail/app
-install -m 644 "$release/deploy/aws/guardrail-api.service" /etc/systemd/system/guardrail-api.service
-systemctl daemon-reload
-systemctl enable guardrail-api >/dev/null 2>&1
-systemctl restart guardrail-api
-
-step "백엔드 (구글 로그인, 127.0.0.1:8030) : backend.env · 유닛 · 재시작 (DM-108)"
+step "backend.env (백엔드 · 게이트웨이가 읽는다, DM-108)"
 [[ -n "$CLIENT_ID" ]] || CLIENT_ID=$(sed -n 's/^GOOGLE_CLIENT_ID=//p' "$BACKEND_ENV" 2>/dev/null | tail -n 1)
 # C-19-8K part 0 : creating a project needs a default provider. PM : kmu (the school gateway, the demo's upstream).
 # A value already on the server is kept. Neither line is a secret (no key, only a provider name and a public URL).
@@ -98,62 +91,10 @@ tmp=$(umask 027 && mktemp "$BACKEND_ENV.XXXXXX")
     [[ -z "$CLIENT_ID" ]] || printf 'GOOGLE_CLIENT_ID=%s\n' "$CLIENT_ID"
 } > "$tmp"
 chown root:guardrail "$tmp" && chmod 640 "$tmp" && mv "$tmp" "$BACKEND_ENV"
-install -m 644 "$release/deploy/aws/guardrail-backend.service" /etc/systemd/system/guardrail-backend.service
-systemctl daemon-reload
-systemctl enable guardrail-backend >/dev/null 2>&1
-systemctl restart guardrail-backend
 [[ -n "$CLIENT_ID" ]] || printf '주의 : 구글 클라이언트 ID 가 없다. 로그인 화면은 열리지만 로그인 버튼이 나오지 않는다\n'
 
-step "서비스 게이트웨이 (MAG API 키, 127.0.0.1:8050) : 유닛 · 재시작 (C-19-9)"
-# The same backend.env (DB URL, provider settings) : the key check and the upstream allow-list match the screen.
-install -m 644 "$release/deploy/aws/guardrail-gateway.service" /etc/systemd/system/guardrail-gateway.service
-systemctl daemon-reload
-systemctl enable guardrail-gateway >/dev/null 2>&1
-systemctl restart guardrail-gateway
-
-step "Caddy : 도메인 → caddy.env, Caddyfile 설치, 확인, 다시 읽기"
-tmp=$(umask 077 && mktemp "$CADDY_ENV.XXXXXX")
-# DM-109 : the old shared-password lines (GUARDRAIL_BASIC_AUTH_*) are dropped with the basic auth block.
-{ grep -v -e '^GUARDRAIL_DOMAIN=' -e '^GUARDRAIL_BASIC_AUTH_' "$CADDY_ENV" || true; printf 'GUARDRAIL_DOMAIN=%s\n' "$DOMAIN"; } > "$tmp"
-chmod 600 "$tmp" && mv "$tmp" "$CADDY_ENV"
-# C-19-10 : check the new Caddyfile before it replaces the one in use (a bad file never lands in /etc/caddy).
-( set -a; . "$CADDY_ENV"; set +a; caddy validate --config "$release/deploy/aws/Caddyfile.template" --adapter caddyfile >/dev/null ) \
-    || die "새 Caddyfile 검사 실패 — /etc/caddy/Caddyfile 은 그대로다"
-install -m 644 "$release/deploy/aws/Caddyfile.template" /etc/caddy/Caddyfile
-systemctl reload-or-restart caddy
-
-step "API 응답 (127.0.0.1:8020)"
-for _ in $(seq 1 20); do
-    if curl -fsS -o /dev/null http://127.0.0.1:8020/api/summary; then
-        printf 'API 응답 확인\n'
-        break
-    fi
-    sleep 1
-done
-curl -fsS -o /dev/null http://127.0.0.1:8020/api/summary || { journalctl -u guardrail-api -n 30 --no-pager >&2; die "API 가 응답하지 않는다"; }
-
-step "백엔드 응답 (127.0.0.1:8030/login)"
-for _ in $(seq 1 20); do
-    if curl -fsS -o /dev/null http://127.0.0.1:8030/login; then
-        printf '백엔드 응답 확인\n'
-        break
-    fi
-    sleep 1
-done
-curl -fsS -o /dev/null http://127.0.0.1:8030/login || { journalctl -u guardrail-backend -n 30 --no-pager >&2; die "백엔드가 응답하지 않는다 (사이트 · API 는 새 릴리스로 바뀌었다)"; }
-
-step "게이트웨이 응답 (127.0.0.1:8050/healthz)"
-for _ in $(seq 1 20); do
-    if curl -fsS -o /dev/null http://127.0.0.1:8050/healthz; then
-        printf '게이트웨이 응답 확인\n'
-        break
-    fi
-    sleep 1
-done
-curl -fsS -o /dev/null http://127.0.0.1:8050/healthz || { journalctl -u guardrail-gateway -n 30 --no-pager >&2; die "게이트웨이가 응답하지 않는다 (사이트 · API · 백엔드는 새 릴리스로 바뀌었다)"; }
-
-step "옛 릴리스 정리 (최근 3 개 남김)"
-ls -1dt /opt/guardrail/releases/*/ | tail -n +4 | while read -r old; do
-    [[ "$(readlink -f /opt/guardrail/app)/" == "$old" ]] || rm -rf -- "$old"
-done
+step "두 칸 전환 (C-19-11) : 새 버전을 쉬는 칸에 → 상태 확인 → Caddy 전환 → 옛 칸 정리"
+# Everything from here is slots.sh : a failed health check or switch ends with 1 and the version in use stays.
+bash "$release/deploy/aws/slots.sh" deploy "$release" "$DOMAIN" \
+    || die "새 버전으로 바꾸지 못했다 (위 출력). 서버는 이전 버전 그대로다"
 printf '\n배포 끝 : %s (commit %s)\n' "$release" "${commit:0:12}"
