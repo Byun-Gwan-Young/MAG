@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   ArrowDown,
   ArrowRight,
   Bell,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   CircleHelp,
   Copy,
   Database,
@@ -416,6 +418,7 @@ function SessionViewer({ session, api = false, issueDefs }) {
               steps={rows}
               selected={step.n}
               onSelect={(n) => change(rows.findIndex((x) => x.n === n))}
+              utteranceLog={s.utterance_log}
             />
           </>
         )}
@@ -575,9 +578,26 @@ function TokenChart({ steps }) {
 const tokenText = (v) => (v == null ? "측정 안 됨" : number(v));
 
 // C-19-9b: one row per step : this step's tokens, the running total and the basis line (why the step was judged as
-// it was, built on the server from recorded signal values).
-function StepTable({ steps, selected, onSelect }) {
+// it was, built on the server from recorded signal values). A row opens to role · utterance excerpt · basis. The
+// excerpt exists only for a gateway project whose owner turned the utterance log on ; demo records never show one.
+function saidNote(utteranceLog) {
+  if (utteranceLog === undefined || utteranceLog === null)
+    return "데모 기록은 발화를 표시하지 않습니다.";
+  if (!utteranceLog)
+    return "이 프로젝트는 발화 기록이 꺼져 있어 응답 본문을 저장하지 않았습니다. 프로젝트 설정에서 켤 수 있습니다.";
+  return "이 단계에 저장된 발화가 없습니다 (도구 호출만 있었거나 7 일이 지나 지워졌습니다).";
+}
+
+function StepTable({ steps, selected, onSelect, utteranceLog }) {
   const stop = steps.find((s) => s.stop)?.n;
+  const [open, setOpen] = useState(() => new Set());
+  const toggle = (n) =>
+    setOpen((now) => {
+      const next = new Set(now);
+      if (next.has(n)) next.delete(n);
+      else next.add(n);
+      return next;
+    });
   return (
     <div className="table-wrap step-table">
       <table>
@@ -589,28 +609,66 @@ function StepTable({ steps, selected, onSelect }) {
             <th>이번 토큰</th>
             <th>누적 토큰</th>
             <th>판정 근거</th>
+            <th>
+              <span className="sr-only">펼치기</span>
+            </th>
           </tr>
         </thead>
         <tbody>
           {steps.map((s) => (
-            <tr
-              key={s.n}
-              className={
-                (s.n === selected ? "selected " : "") +
-                (stop != null && s.n > stop ? "after-stop" : "")
-              }
-            >
-              <td>
-                <button className="table-link" onClick={() => onSelect(s.n)}>
-                  {s.n}
-                </button>
-              </td>
-              <td>{s.role || s.agent || "—"}</td>
-              <td>{s.stop ? "STOP" : s.label || s.state || "—"}</td>
-              <td className="mono">{tokenText(s.tok)}</td>
-              <td className="mono">{tokenText(s.cum)}</td>
-              <td className="basis">{s.basis || "—"}</td>
-            </tr>
+            <Fragment key={s.n}>
+              <tr
+                className={
+                  (s.n === selected ? "selected " : "") +
+                  (stop != null && s.n > stop ? "after-stop" : "")
+                }
+              >
+                <td>
+                  <button className="table-link" onClick={() => onSelect(s.n)}>
+                    {s.n}
+                  </button>
+                </td>
+                <td>{s.role || s.agent || "—"}</td>
+                <td>{s.stop ? "STOP" : s.label || s.state || "—"}</td>
+                <td className="mono">{tokenText(s.tok)}</td>
+                <td className="mono">{tokenText(s.cum)}</td>
+                <td className="basis">{s.basis || "—"}</td>
+                <td>
+                  <button
+                    className="icon-button"
+                    aria-expanded={open.has(s.n)}
+                    aria-label={`${s.n}단계 ${open.has(s.n) ? "접기" : "펼치기"}`}
+                    onClick={() => toggle(s.n)}
+                  >
+                    {open.has(s.n) ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                  </button>
+                </td>
+              </tr>
+              {open.has(s.n) && (
+                <tr className="step-expanded">
+                  <td colSpan={7}>
+                    <dl>
+                      <dt>역할</dt>
+                      <dd>{s.role || s.agent || "역할 미기록"}</dd>
+                      <dt>발화 앞부분</dt>
+                      <dd>
+                        {s.said?.length ? (
+                          s.said.map((u) => (
+                            <blockquote key={u.call} className="said">
+                              {u.text}
+                            </blockquote>
+                          ))
+                        ) : (
+                          <span className="muted">{saidNote(utteranceLog)}</span>
+                        )}
+                      </dd>
+                      <dt>판정 근거</dt>
+                      <dd>{s.basis || "—"}</dd>
+                    </dl>
+                  </td>
+                </tr>
+              )}
+            </Fragment>
           ))}
         </tbody>
       </table>
@@ -1213,6 +1271,30 @@ export function Projects({ user, preview }) {
       setProviderBusy(false);
     }
   };
+  // C-19-9b: the project's utterance log (off by default). Off deletes the stored excerpts at once.
+  const [logBusy, setLogBusy] = useState(false);
+  const [logNotice, setLogNotice] = useState(null);
+  const changeLog = async (next) => {
+    setLogBusy(true);
+    setError(null);
+    setLogNotice(null);
+    try {
+      await patch(`/api/projects/${selected}`, {
+        utterance_log: next,
+        csrf_token: user.csrf_token,
+      });
+      setLogNotice(
+        next
+          ? "발화 기록을 켰습니다. 이후 요청부터 저장합니다."
+          : "발화 기록을 껐습니다. 이 프로젝트에 저장된 발화를 모두 지웠습니다.",
+      );
+      projects.retry();
+    } catch (e) {
+      setError(e);
+    } finally {
+      setLogBusy(false);
+    }
+  };
   const current = projects.data?.find((p) => p.id === selected);
   const loadDetail = async (id) => {
     setError(null);
@@ -1377,6 +1459,39 @@ export function Projects({ user, preview }) {
               {providerBusy ? "저장 중…" : "제공자 저장"}
             </button>
           </div>
+        </Panel>
+      )}
+      {current && (
+        <Panel
+          title="발화 기록"
+          subtitle={`${current.name} · 지금 ${current.utterance_log ? "켜짐" : "꺼짐 (기본)"}`}
+        >
+          <div className="mode-switch" role="radiogroup" aria-label="발화 기록">
+            {[
+              [false, "끄기", "응답 본문을 저장하지 않습니다. 끄면 저장분을 바로 지웁니다."],
+              [true, "켜기", "응답 본문 앞 1,000 자를 7 일 동안 저장합니다."],
+            ].map(([value, title, text]) => (
+              <button
+                key={title}
+                role="radio"
+                aria-checked={!!current.utterance_log === value}
+                disabled={logBusy || !!current.utterance_log === value}
+                onClick={() => changeLog(value)}
+              >
+                <b>{title}</b>
+                <small>{text}</small>
+              </button>
+            ))}
+          </div>
+          <p className="muted utterance-note">
+            켜면 에이전트 응답 본문 앞부분을 7 일 동안 저장해 판정 근거와 함께
+            보여 줍니다. LLM 키와 추론 내용은 저장하지 않습니다.
+          </p>
+          {logNotice && (
+            <p className="notice" role="status">
+              {logNotice}
+            </p>
+          )}
         </Panel>
       )}
       {selected && (

@@ -1206,7 +1206,7 @@ def list_projects(user_id):
                 """
                 SELECT
                     id, name, mode, rule_id, provider, upstream_url,
-                    owner_user_id, read_only, created_at
+                    owner_user_id, read_only, created_at, utterance_log
                 FROM projects
                 WHERE owner_user_id = %s
                    OR (owner_user_id IS NULL AND read_only = TRUE)
@@ -1259,6 +1259,54 @@ def set_project_mode(project_id, user_id, mode):
                 user_id,
                 {"project_id": project_id, "mode": mode},
             )
+
+
+def set_project_utterance_log(project_id, user_id, enabled):
+    """C-19-9b (DM-120) : turn the project's utterance log on or off (owner of a writable project only).
+
+    Off deletes every stored utterance of the project's sessions at once, in the same transaction. The audit event
+    records the project, the new setting and how many rows were deleted — never any text.
+    Returns {"project_id", "utterance_log", "deleted"}.
+    """
+    if not isinstance(enabled, bool):
+        raise ValueError("enabled must be a boolean")
+
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            _require_active_account_cursor(cursor, user_id, lock=True)
+            project = _owned_project(cursor, project_id, user_id)
+            if project is None:
+                # Deliberately do not distinguish "not found" from "not yours".
+                raise LookupError("project not found")
+
+            cursor.execute(
+                """
+                UPDATE projects
+                SET utterance_log = %s
+                WHERE id = %s
+                """,
+                (enabled, project_id),
+            )
+            deleted = 0
+            if not enabled:
+                cursor.execute(
+                    """
+                    DELETE FROM utterances AS u
+                    USING sessions AS s, scenarios AS sc
+                    WHERE u.session_id = s.id
+                      AND s.scenario_id = sc.id
+                      AND sc.project_id = %s
+                    """,
+                    (project_id,),
+                )
+                deleted = cursor.rowcount if isinstance(getattr(cursor, "rowcount", None), int) else 0
+            _record_auth_event_cursor(
+                cursor,
+                "project_utterance_log_changed",
+                user_id,
+                {"project_id": project_id, "utterance_log": enabled, "deleted": deleted},
+            )
+            return {"project_id": project_id, "utterance_log": enabled, "deleted": deleted}
 
 
 def set_project_provider(project_id, user_id, provider, upstream_url=None):

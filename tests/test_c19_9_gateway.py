@@ -64,6 +64,12 @@ class FakeLive:
     def add_llm_call(self, *args):
         self._check('add_llm_call', *args)
 
+    def add_utterance(self, *args):
+        # C-19-9b : the gateway hands every response excerpt to storage, which keeps it only for a project that
+        # turned its utterance log on (checked by the real argument validation here, stored nowhere).
+        self._check('add_utterance', *args)
+        return False
+
     def add_observation(self, *args):
         self._check('add_observation', *args)
 

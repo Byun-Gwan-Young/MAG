@@ -90,7 +90,8 @@ def revoke_key(payload: CsrfRequest, key_id: int = Path(..., ge=1, le=MAX_ID), u
 @router.patch("/api/projects/{project_id}", response_model=ProjectResponse)
 def set_mode(payload: ProjectModeRequest, project_id: int = Path(..., ge=1, le=MAX_ID),
              user=Depends(get_current_user)):
-    """The project mode (C-19-8K) and/or its LLM provider (C-19-8P, an id from GET /api/providers)."""
+    """The project mode (C-19-8K), its LLM provider (C-19-8P, an id from GET /api/providers) and/or its utterance
+    log (C-19-9b, off by default)."""
     _check_csrf(user, payload.csrf_token)
     _writable_project(user, project_id)
     if payload.provider is not None and not accounts.provider_available(payload.provider):
@@ -102,4 +103,7 @@ def set_mode(payload: ProjectModeRequest, project_id: int = Path(..., ge=1, le=M
             _call(accounts.set_project_provider, project_id, user["id"], payload.provider)
         except ValueError as exc:   # availability changed in between : same answer, no message echoed
             raise HTTPException(422, "Provider not available") from exc
+    if payload.utterance_log is not None:
+        # C-19-9b : off deletes the project's stored utterances in the same storage transaction.
+        _call(accounts.set_project_utterance_log, project_id, user["id"], payload.utterance_log)
     return _writable_project(user, project_id)

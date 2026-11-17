@@ -42,6 +42,8 @@ class ProjectResponse(BaseModel):
     rule_id: str
     provider: str | None = None
     created_at: datetime
+    # C-19-9b : the project's utterance log (off by default ; on = LLM response excerpts kept 7 days).
+    utterance_log: bool = False
 
 
 class ProviderResponse(BaseModel):
@@ -60,16 +62,18 @@ class CsrfRequest(BaseModel):
 
 
 class ProjectModeRequest(CsrfRequest):
-    """PATCH /api/projects/{id} : the mode (C-19-8K) and/or the provider (C-19-8P), at least one."""
+    """PATCH /api/projects/{id} : the mode (C-19-8K), the provider (C-19-8P) and/or the utterance log (C-19-9b),
+    at least one."""
     mode: Literal["observe", "block"] | None = None
     provider: str | None = Field(default=None, max_length=32)
+    utterance_log: bool | None = None
 
     _provider = field_validator("provider")(_check_provider)
 
     @model_validator(mode="after")
     def one_change(self):
-        if self.mode is None and self.provider is None:
-            raise ValueError("mode or provider is required")
+        if self.mode is None and self.provider is None and self.utterance_log is None:
+            raise ValueError("mode, provider or utterance_log is required")
         return self
 
 

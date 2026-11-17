@@ -21,6 +21,11 @@ and the upstream timeout (600 s read, DM-79) are the Mac proxy's own. What the g
   storage.live (DM-96 ⑤, source "live", the project's scenario rows) — no JSON session files on the server. The DB
   session id is "p<project id>-<session key>" (session ids are unique across projects).
 - Request size limit (GUARDRAIL_GATEWAY_MAX_BODY_BYTES, default 8 MiB) : 413.
+- C-19-9b (DM-120) utterance log : for each LLM call the first 1,000 characters of the response's assistant content
+  (its narrative when the content is our output contract's JSON report) go to storage.live.add_utterance, which keeps
+  them only when the project's owner turned utterance_log on (off by default) and for 7 days. reasoning_content, the
+  request body and every header (Authorization, the guardrail key) are never passed. A failed utterance write is
+  logged by exception type only and never fails the request.
 
 Limits (reported) : one worker ; sessions live in this process's memory, so a session recorded before a gateway restart
 cannot continue (409 : use a new session key) ; DB writes are synchronous inside the request.
@@ -121,6 +126,34 @@ def observation_data(observation):
     return data
 
 
+UTTERANCE_MAX_CHARS = 1000
+FENCE = re.compile(r'^```(?:json)?\s*(.*?)\s*```$', re.S)
+
+
+def utterance_excerpt(response_body):
+    """The text the utterance log may keep for one LLM response : choices[0].message.content (never
+    reasoning_content, never the request), or its "narrative" when the content is our JSON report ; cut to 1,000
+    characters. None when there is no assistant text (tool calls only, an error, a refused 403)."""
+    if not isinstance(response_body, dict):
+        return None
+    choices = response_body.get('choices')
+    if not (isinstance(choices, list) and choices and isinstance(choices[0], dict)):
+        return None
+    message = choices[0].get('message')
+    content = message.get('content') if isinstance(message, dict) else None
+    if not isinstance(content, str) or not content.strip():
+        return None
+    text = content.strip()
+    fenced = FENCE.match(text)
+    try:
+        report = json.loads(fenced.group(1) if fenced else text)
+    except ValueError:
+        report = None
+    if isinstance(report, dict) and isinstance(report.get('narrative'), str) and report['narrative'].strip():
+        text = report['narrative'].strip()
+    return text[:UTTERANCE_MAX_CHARS]
+
+
 def _count(value):
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
 
@@ -169,6 +202,16 @@ class LiveRepository:
             raise OSError(f'live session start not recorded ({type(exc).__name__})') from None
         self.written[key] = {'turns': 0, 'observations': 0, 'ended': False}
 
+    def record_utterance(self, db_id, call_index, step, response_body):
+        """C-19-9b : hand the response excerpt to storage, which keeps it only for a project with utterance_log on."""
+        excerpt = utterance_excerpt(response_body)
+        if not excerpt:
+            return
+        try:
+            self.live.add_utterance(db_id, call_index, step, None, excerpt)
+        except Exception as exc:   # the request goes on ; no text or value in the log line
+            logger.warning('Utterance not recorded (%s)', type(exc).__name__)
+
     def load(self, session_id):
         # The gateway routes only sessions it started in this process (a recorded one is refused before this).
         return None
@@ -189,11 +232,13 @@ class LiveRepository:
                 turn.get('response_body'), dict) else {}
             details = usage.get('completion_tokens_details') if isinstance(usage, dict) else None
             reasoning = details.get('reasoning_tokens') if isinstance(details, dict) else None
-            self.live.add_llm_call(db_id, turn['turn'], steps_of.get(turn['turn'], len(observations) + 1), None,
+            step = steps_of.get(turn['turn'], len(observations) + 1)
+            self.live.add_llm_call(db_id, turn['turn'], step, None,
                                    _count(turn.get('prompt_tokens')), _count(turn.get('completion_tokens')),
                                    _count(reasoning), _number(turn.get('upstream_ms')), _count(turn.get('status_code')),
                                    _count(turn.get('retry_count')), _count(turn.get('tool_calls')))
             state['turns'] += 1
+            self.record_utterance(db_id, turn['turn'], step, turn.get('response_body'))
         for observation in observations[state['observations']:]:
             step, agent = observation['step_id'], observation.get('agent_id')
             criteria = observation.get('criteria') or {}

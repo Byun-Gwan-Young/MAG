@@ -247,7 +247,7 @@ Storage는 판정 규칙 자체를 결정하지 않고, Proxy/Backend/UI의 동�
 
 ### 절대 깨면 안 되는 불변조건
 
-- **canonical schema는 `storage/schema.sql` 하나**입니다. 현재 10개 테이블이며 `steps` 테이블은 만들지 않습니다.
+- **canonical schema는 `storage/schema.sql` 하나**입니다. 현재 11개 테이블이며 `steps` 테이블은 만들지 않습니다 (11 번째 `utterances` 는 C-19-9b 프로젝트별 발화 기록 : 기본 꺼짐, 켠 프로젝트의 LLM 응답 앞 1,000 자만 7 일).
 - `scenario_hash`는 파싱된 YAML 내용이 아니라 **실행에 사용된 `scenario.yaml` 원본 바이트의 SHA-256**입니다.
 - `observations`는 판정 **입력**, `judgements`는 progress/criteria **계산 결과**입니다. 둘을 한 JSON에 중복 저장하지 않습니다.
 - LLM/user 원문, reasoning 본문, request/response body, DB 비밀번호, Provider API key 원문은 PostgreSQL에 저장하지 않습니다.
@@ -357,7 +357,7 @@ python -m storage init
 이 명령은 가능한 경우 다음을 자동으로 처리합니다.
 
 1. 설정된 대상 DB가 없을 때만 DB 생성 시도
-2. `schema.sql`의 통합 10개 테이블 생성/보강
+2. `schema.sql`의 통합 11개 테이블 생성/보강
 3. 현재 프로젝트 목록 안내
 
 `init`은 **owner 없는 writable 프로젝트를 자동 생성하지 않습니다.** 사용자 프로젝트는
@@ -525,7 +525,7 @@ DSN/비밀번호는 로그나 예외 메시지에 출력하지 않습니다.
 
 ## 파일
 
-- `schema.sql`: **현재 통합 10개 테이블 구조**의 canonical 스키마
+- `schema.sql`: **현재 통합 11개 테이블 구조**의 canonical 스키마
 - `db.py`: PostgreSQL 연결/프로젝트 자동 선택
 - `init_db.py`: pgAdmin 없이 DB/schema 준비 (ownerless writable project는 만들지 않음)
 - `import_utils.py`: 공통 검증/변환 함수

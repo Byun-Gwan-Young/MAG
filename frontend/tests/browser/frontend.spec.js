@@ -596,3 +596,84 @@ test("C-19-8P: pick the LLM provider on create, see it in the list, change it", 
     page.getByText("MAG 는 그 키를 저장하지 않고 전달만", { exact: false }),
   ).toBeVisible();
 });
+
+// C-19-9b: tokens, basis line and the utterance log on the live monitor and the project settings.
+const monitorSession = {
+  ...liveSession,
+  utterance_log: true,
+  step_rows: [
+    liveStep(1, "기준", {
+      tok: 120, cum: 120,
+      basis: "기준점 : 이 역할의 첫 관측이라 비교할 이전 기록이 없습니다",
+      said: [{ call: 1, text: "테스트 7개가 통과했습니다. 필터 함수를 고치겠습니다." }],
+    }),
+    liveStep(2, "정체", {
+      tok: 100, cum: 220,
+      basis: "파일 변화 없음 · 통과 테스트 7/16 그대로 · 새 쟁점 없음 → 진전 없는 차례 2/3",
+      said: [],
+    }),
+    liveStep(3, "정체", { tok: 80, cum: 300, stop: { t: "E1", text: liveStop }, basis: liveStop, said: [] }),
+    liveStep(4, "차단 (403)", {
+      blocked: true, status: "blocked", tests: null, tok: 0, cum: 300,
+      basis: "차단 : STOP 뒤의 요청이라 업스트림으로 보내지 않고 403 으로 돌려주었습니다", said: [],
+    }),
+  ],
+};
+
+test("C-19-9b: step tokens, cumulative bar with STOP, basis lines, utterance excerpt, utterance-log setting", async ({
+  page,
+}) => {
+  const writes = [];
+  let project = { id: 5, name: "실행기", mode: "block", provider: "kmu", rule_id: "deadlock-v0.3", utterance_log: false };
+  await page.route("**/api/**", async (route) => {
+    const req = route.request();
+    const path = new URL(req.url()).pathname;
+    const respond = (body, status = 200) =>
+      route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
+    if (path === "/api/auth/me") return respond(user);
+    if (path === "/api/frontend/reference") return respond(data);
+    if (path === "/api/summary") return respond({ headline: data.headline, judgement_ms: data.judgement_ms });
+    if (path === "/api/sessions") return respond({ count: 0, sessions: [] });
+    if (path === "/api/providers") return respond(providers);
+    if (path === "/api/live/sessions")
+      return respond({ version: "service-live-v1", now: liveRow.started_at, sessions: [{ ...liveRow, tokens: 300 }] });
+    if (path === "/api/live/sessions/p5-run-a")
+      return respond({ version: "service-live-v1", now: liveRow.started_at, session: monitorSession });
+    if (path === "/api/projects" && req.method() === "GET") return respond([project]);
+    if (path === "/api/projects/5" && req.method() === "PATCH") {
+      const body = req.postDataJSON();
+      writes.push(body);
+      project = { ...project, utterance_log: body.utterance_log };
+      return respond(project);
+    }
+    if (path === "/api/projects/5/sessions") return respond({ items: [], total: 0, offset: 0, limit: 20 });
+    return respond({ detail: "Not found" }, 404);
+  });
+  await page.goto("/#live");
+  await page.getByRole("button", { name: "run-a 세션 보기" }).click();
+  const table = page.locator(".step-table");
+  await expect(table.getByRole("columnheader", { name: "이번 토큰" })).toBeVisible();
+  await expect(table.getByRole("columnheader", { name: "누적 토큰" })).toBeVisible();
+  await expect(table.getByRole("columnheader", { name: "판정 근거" })).toBeVisible();
+  await expect(table.locator("tbody tr").nth(1)).toContainText("220");
+  await expect(table).toContainText("진전 없는 차례 2/3");
+  await expect(page.locator(".chart-bars .stop-bar .stop-mark")).toHaveText("STOP");
+  await expect(page.locator(".chart-bars .after-bar")).toHaveCount(1);
+  await table.getByRole("button", { name: "1단계 펼치기" }).click();
+  await expect(table.locator(".said")).toHaveText("테스트 7개가 통과했습니다. 필터 함수를 고치겠습니다.");
+  await table.getByRole("button", { name: "2단계 펼치기" }).click();
+  await expect(table.locator(".step-expanded").nth(1)).toContainText("이 단계에 저장된 발화가 없습니다");
+  await page.goto("/#projects");
+  await page.getByRole("button", { name: /실행기/ }).click();
+  const log = page.getByRole("radiogroup", { name: "발화 기록" });
+  await expect(log.getByRole("radio", { name: /끄기/ })).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByText("켜면 에이전트 응답 본문 앞부분을 7 일 동안 저장해")).toBeVisible();
+  await log.getByRole("radio", { name: /켜기/ }).click();
+  await expect(log.getByRole("radio", { name: /켜기/ })).toHaveAttribute("aria-checked", "true");
+  await log.getByRole("radio", { name: /끄기/ }).click();
+  await expect(page.getByText("저장된 발화를 모두 지웠습니다")).toBeVisible();
+  expect(writes).toEqual([
+    { utterance_log: true, csrf_token: user.csrf_token },
+    { utterance_log: false, csrf_token: user.csrf_token },
+  ]);
+});

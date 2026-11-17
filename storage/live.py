@@ -32,7 +32,7 @@ from typing import Any
 from psycopg.types.json import Jsonb
 
 from storage.db import get_connection
-from storage.safety import assert_no_secrets, assert_safe_storage_json
+from storage.safety import assert_no_secrets, assert_safe_storage_json, secret_hits
 
 
 VALID_MODES = {"observe", "block"}
@@ -1008,6 +1008,102 @@ def get_session_llm_calls(session_id):
                     call_index, step, prompt_tokens, completion_tokens
                 FROM llm_calls
                 WHERE session_id = %s
+                ORDER BY call_index
+                """,
+                (session_id,),
+            )
+            return _rows_dict(cursor)
+
+
+# --- C-19-9b (DM-120) : per-project utterance log, off by default ---------------------------------------------------
+# The one place raw model text may be stored : the first UTTERANCE_MAX_CHARS characters of an LLM response body
+# (assistant content, or narrative for our output contract), only for a project whose owner turned utterance_log on,
+# kept UTTERANCE_RETENTION_DAYS days. Reasoning text, request bodies and keys are never accepted here.
+UTTERANCE_MAX_CHARS = 1000
+UTTERANCE_RETENTION_DAYS = 7
+
+
+def _purge_expired_utterances(cursor) -> int:
+    cursor.execute("DELETE FROM utterances WHERE expires_at <= CURRENT_TIMESTAMP")
+    return cursor.rowcount if isinstance(getattr(cursor, "rowcount", None), int) else 0
+
+
+def purge_expired_utterances() -> int:
+    """Delete utterances past their 7 days; returns how many rows went. Also run on every write and read below."""
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            return _purge_expired_utterances(cursor)
+
+
+def add_utterance(session_id, call_index, step, agent_id, text) -> bool:
+    """Store one LLM response excerpt for a live session whose project has utterance_log on.
+
+    Returns False and stores nothing when the project's setting is off (the default), the text is empty, or the
+    text carries a key pattern (it is dropped, not cleaned). The setting is read in the same transaction as the
+    insert, so turning it off stops storage at once. ``text`` is cut to UTTERANCE_MAX_CHARS. An exact retry of the
+    same call index is ignored.
+    """
+
+    session_id = _validate_nonempty(session_id, "session_id")
+    call_index = _validate_positive_int(call_index, "call_index")
+    step = _validate_positive_int(step, "step", allow_none=True)
+    if agent_id is not None:
+        agent_id = _validate_nonempty(agent_id, "agent_id")
+    if not isinstance(text, str):
+        raise ValueError("text must be a string")
+    excerpt = text.strip()[:UTTERANCE_MAX_CHARS]
+    if not excerpt or secret_hits(excerpt):
+        return False
+
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            _require_live_session(cursor, session_id, lock=True)
+            cursor.execute(
+                """
+                SELECT p.utterance_log
+                FROM sessions s
+                JOIN scenarios sc ON sc.id = s.scenario_id
+                JOIN projects p ON p.id = sc.project_id
+                WHERE s.id = %s
+                  AND p.read_only = FALSE
+                """,
+                (session_id,),
+            )
+            row = cursor.fetchone()
+            _purge_expired_utterances(cursor)
+            if row is None or row[0] is not True:
+                return False
+            cursor.execute(
+                """
+                INSERT INTO utterances (
+                    session_id, call_index, step, agent_id, excerpt, expires_at
+                )
+                VALUES (
+                    %s, %s, %s, %s, %s,
+                    CURRENT_TIMESTAMP + make_interval(days => %s)
+                )
+                ON CONFLICT (session_id, call_index) DO NOTHING
+                """,
+                (session_id, call_index, step, agent_id, excerpt, UTTERANCE_RETENTION_DAYS),
+            )
+            return True
+
+
+def list_session_utterances(session_id):
+    """The session's stored, unexpired utterance excerpts in call order ([] when the project never turned it on)."""
+
+    session_id = _validate_nonempty(session_id, "session_id")
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            _require_live_session(cursor, session_id)
+            _purge_expired_utterances(cursor)
+            cursor.execute(
+                """
+                SELECT
+                    call_index, step, agent_id, excerpt, created_at, expires_at
+                FROM utterances
+                WHERE session_id = %s
+                  AND expires_at > CURRENT_TIMESTAMP
                 ORDER BY call_index
                 """,
                 (session_id,),

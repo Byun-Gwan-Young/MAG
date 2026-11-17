@@ -9,7 +9,8 @@
 --  │       └─ sessions
 --  │           ├─ observations
 --  │           ├─ judgements
---  │           └─ llm_calls
+--  │           ├─ llm_calls
+--  │           └─ utterances (C-19-9b, 켠 프로젝트만 · 7 일)
 --  └─ auth_events
 -- allowed_emails (로그인 allow-list)
 --
@@ -23,10 +24,12 @@
 -- MAINTAINER / AI CONTRACT:
 -- - 이 파일이 통합 Storage 스키마의 canonical source다. service 쪽 legacy
 --   schema/writer를 다시 별도 진실원천으로 만들지 않는다.
--- - 현재 구조는 10개 테이블이며 별도 steps 테이블을 추가하지 않는다.
+-- - 현재 구조는 11개 테이블이며 별도 steps 테이블을 추가하지 않는다.
+--   (11 번째 utterances 는 C-19-9b 프로젝트별 발화 기록 — 기본 꺼짐, 7 일 보관)
 -- - canonical demo는 read_only이고 raw/live writer의 대상이 아니다.
 -- - model/user 원문, reasoning 본문, request/response body, Provider key,
 --   Guardrail raw key, DB password를 새 컬럼/JSON에 저장하지 않는다.
+--   예외는 utterances.excerpt 하나 (소유자가 켠 프로젝트의 LLM 응답 앞 1,000 자, 7 일).
 -- - schema 변경으로 기존 데이터를 자동 삭제하지 않는다. destructive
 --   migration은 preview + 명시적 confirmation이 있는 별도 도구로 분리한다.
 -- 자세한 의도/한계/팀 handoff는 storage/README.md를 먼저 읽는다.
@@ -398,6 +401,40 @@ CREATE TABLE IF NOT EXISTS judgements (
     -- 현재는 한 session/step/rule_id당 판정 1개를 유지한다.
     UNIQUE (session_id, step, rule_id)
 );
+
+-- ---------------------------------------------------------
+-- 8. utterances (C-19-9b, DM-120 : 프로젝트별 발화 기록 — 기본 꺼짐)
+-- 원칙 "발화 원문은 기본적으로 저장하지 않는다" 의 유일한 예외. 프로젝트 소유자가
+-- projects.utterance_log 를 켠 프로젝트만, 게이트웨이가 LLM 응답 본문
+-- (assistant 메시지 content, 출력 계약이면 narrative) 앞 1,000 자를 7 일 동안 둔다.
+-- reasoning 본문 · 요청 본문 · LLM 키 · 가드레일 키는 켜도 저장하지 않는다.
+-- 끄면 그 프로젝트의 저장분을 즉시 지우고 (storage.accounts.set_project_utterance_log),
+-- 세션이 지워지면 함께 지워진다 (ON DELETE CASCADE). 쓰기 · 읽기 때 만료분을 지운다.
+-- ---------------------------------------------------------
+ALTER TABLE projects
+    ADD COLUMN IF NOT EXISTS utterance_log BOOLEAN NOT NULL DEFAULT FALSE;
+
+CREATE TABLE IF NOT EXISTS utterances (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    session_id VARCHAR(200) NOT NULL,
+    call_index INTEGER NOT NULL,
+    step INTEGER,
+    agent_id TEXT,
+    excerpt TEXT NOT NULL
+        CONSTRAINT chk_utterances_excerpt_length
+        CHECK (char_length(excerpt) BETWEEN 1 AND 1000),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMPTZ NOT NULL,
+
+    FOREIGN KEY (session_id)
+        REFERENCES sessions(id)
+        ON DELETE CASCADE,
+
+    UNIQUE (session_id, call_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_utterances_expires_at
+    ON utterances (expires_at);
 
 -- ---------------------------------------------------------
 -- 기존 DB에 대한 데이터 삭제/강제 마이그레이션은 이 파일에서 하지 않는다.

@@ -1831,3 +1831,40 @@ footer {
 .provider-form {
   padding-top: 2px;
 }
+
+/* C-19-9b: an opened step row (role · utterance excerpt · basis) and the utterance-log note. */
+.step-table tr.step-expanded td {
+  background: var(--pane);
+  white-space: normal;
+}
+.step-expanded dl {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 6px 12px;
+  margin: 4px 0;
+  font-size: 12px;
+}
+.step-expanded dt {
+  color: var(--muted);
+}
+.step-expanded dd {
+  margin: 0;
+  min-width: 0;
+}
+.step-expanded .said {
+  margin: 0 0 6px;
+  padding: 6px 10px;
+  border-left: 3px solid var(--line-strong);
+  background: var(--card);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.utterance-note {
+  margin: 0 20px 14px;
+  font-size: 12px;
+}
+@media (max-width: 720px) {
+  .step-expanded dl {
+    grid-template-columns: 1fr;
+  }
+}

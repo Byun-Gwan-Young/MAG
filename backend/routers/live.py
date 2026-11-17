@@ -9,6 +9,10 @@ Read-only. Ownership : the user's projects from storage.accounts.list_projects, 
 repository queries (owner checked in SQL), steps from storage.live.get_session_progress. Someone else's session, the
 read-only demo project's records and unknown ids are all 404. No new SQL here. Every response is checked for model
 text fields and key patterns before it leaves (a hit is a 500 without the body).
+
+C-19-9b (DM-120) : step rows also carry this step's and the running token count, the basis line (service/basis.py)
+and, in the one-session view of a project whose owner turned the utterance log on, the stored response excerpts
+("said" : at most 1,000 characters each, 7 days, never reasoning or request text). A demo project shows none.
 """
 from datetime import datetime, timezone
 
@@ -86,6 +90,17 @@ def _calls(session_id):
         return []
 
 
+def _utterances(project, session_id):
+    """C-19-9b : the session's stored utterance excerpts, only for a project whose utterance log is on (storage also
+    stores nothing for one that is off, and deletes the rows when it is turned off). [] otherwise."""
+    if project.get("utterance_log") is not True:
+        return []
+    try:
+        return live.list_session_utterances(session_id)
+    except LookupError:
+        return []
+
+
 def _step_tokens(calls):
     """{step: tokens} from the gateway's LLM-call rows : prompt + completion summed over the step's calls. A step
     with any call whose response carried no usage is None ("측정 안 됨"), never a partial sum or 0."""
@@ -144,7 +159,7 @@ def _step_row(observation, judgement):
             "tok": None, "cum": None, "cumc": None}
 
 
-def _view(project, row, progress, now, calls=()):
+def _view(project, row, progress, now, calls=(), utterances=()):
     """One session in the shape of tools/demo_live.session_view (the screen's session plus live fields)."""
     judgements = {j["step"]: j for j in (progress or {}).get("judgements") or []}
     observations = {o["step"]: o for o in (progress or {}).get("observations") or []}
@@ -168,6 +183,12 @@ def _view(project, row, progress, now, calls=()):
     shapes = [basis.from_live(r, res.get("progress"), res.get("criteria")) for r, res in zip(rows, results)]
     for r, text in zip(rows, basis.annotate(shapes)):
         r["basis"] = text
+    # C-19-9b part 3 : each step's stored response excerpts (call order), when the project keeps them.
+    said = {}
+    for u in utterances or ():
+        said.setdefault(u.get("step"), []).append({"call": u.get("call_index"), "text": u.get("excerpt")})
+    for r in rows:
+        r["said"] = said.get(r["n"], [])
     times = [o.get("observed_at") for o in observations.values() if o.get("observed_at")]
     times += [row["started_at"]] if row.get("started_at") else []
     last = max(times) if times else None
@@ -186,6 +207,7 @@ def _view(project, row, progress, now, calls=()):
         "stop_text": first["stop"]["text"] if first else None, "stop_steps": stops, "blocked_step": blocked,
         "if_stopped": None, "started_at": _iso(row.get("started_at")), "account": None, "plan": None,
         "replay": False, "model": row["model"], "step_rows": rows,
+        "utterance_log": project.get("utterance_log") is True,
         "live": {"status": "ended" if ended else "running", "lane": None, "lanes": None, "repeat": None,
                  "model": row["model"], "updated_at": _iso(last),
                  "idle_seconds": None if last is None else max(0, round((now - last).total_seconds())),
@@ -229,9 +251,10 @@ def session(session_id: str = Path(..., min_length=1, max_length=200), user=Depe
             raise HTTPException(404, "Session not found")
         progress = _progress(session_id)
         calls = _calls(session_id)
+        utterances = _utterances(match[0], session_id) if progress is not None else []
     except DatabaseError:
         raise HTTPException(503, "Database unavailable") from None
     if progress is None:
         raise HTTPException(404, "Session not found")
     now = _now()
-    return _guarded({"version": LIVE_VERSION, "now": _iso(now), "session": _view(*match, progress, now, calls)})
+    return _guarded({"version": LIVE_VERSION, "now": _iso(now), "session": _view(*match, progress, now, calls, utterances)})

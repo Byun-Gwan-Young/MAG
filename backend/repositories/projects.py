@@ -4,7 +4,7 @@ from psycopg import Connection
 def fetch_projects(conn: Connection, owner_user_id: int):
     with conn.cursor() as cursor:
         cursor.execute(
-            "SELECT id, name, mode, rule_id, provider, created_at FROM projects "
+            "SELECT id, name, mode, rule_id, provider, created_at, utterance_log FROM projects "
             "WHERE owner_user_id = %s ORDER BY id",
             (owner_user_id,),
         )
