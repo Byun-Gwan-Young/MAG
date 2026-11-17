@@ -1422,7 +1422,12 @@ def issue_api_key(project_id, user_id, name):
 
 
 def list_api_keys(project_id, user_id):
-    """List safe key metadata for an owned project; never return raw/hash values."""
+    """List safe key metadata for an owned project; never return raw/hash values.
+
+    C-19-9c (DM-121) : live keys only. A revoked key's row (prefix, digest, revoked_at) stays in the table for the
+    audit trail and verify_api_key keeps refusing it ; it just leaves the list. ``revoked`` / ``revoked_at`` stay in
+    the row shape (always false / null here) so the API response keeps its fields.
+    """
     with get_connection() as conn:
         with conn.cursor() as cursor:
             _require_active_account_cursor(cursor, user_id)
@@ -1438,6 +1443,7 @@ def list_api_keys(project_id, user_id):
                     (revoked_at IS NOT NULL) AS revoked
                 FROM api_keys
                 WHERE project_id = %s
+                  AND revoked_at IS NULL
                 ORDER BY created_at DESC, id DESC
                 """,
                 (project_id,),

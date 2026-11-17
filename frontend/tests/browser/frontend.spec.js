@@ -434,9 +434,7 @@ test("C-19-8K: key issue shows the raw key once, list, revoke, project mode, gui
     if (path === "/api/projects/5/keys") return respond(keys);
     if (path === "/api/keys/9/revoke") {
       writes.push([path, req.postDataJSON()]);
-      keys = [
-        { ...keys[0], revoked: true, revoked_at: "2026-11-17T04:00:00Z" },
-      ];
+      keys = []; // C-19-9c: the server lists live keys only
       return respond({ id: 9, revoked: true });
     }
     if (path === "/api/projects/5" && req.method() === "PATCH") {
@@ -476,7 +474,14 @@ test("C-19-8K: key issue shows the raw key once, list, revoke, project mode, gui
   ).not.toContain("gk_");
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "폐기", exact: true }).click();
-  await expect(page.locator(".badge.blocked")).toContainText("폐기");
+  // C-19-9c: the revoked key leaves the list at once, with one notice.
+  await expect(page.getByRole("status")).toHaveText(
+    "'실행기' 키를 폐기했습니다.",
+  );
+  await expect(page.locator("td.mono")).toHaveCount(0);
+  await expect(
+    page.getByText("이 프로젝트에 발급한 키가 없습니다"),
+  ).toBeVisible();
   await page
     .getByRole("navigation")
     .getByRole("button", { name: "프로젝트", exact: true })

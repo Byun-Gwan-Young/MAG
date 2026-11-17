@@ -38,10 +38,12 @@ class KeysFakeCursor(FakeCursor):
                     if p["owner_user_id"] == user_id or (p["owner_user_id"] is None and p["read_only"])]
             self._set_rows(columns, rows)
             return
-        if "FROM api_keys WHERE project_id = %s ORDER BY created_at DESC, id DESC" in q:
+        if "FROM api_keys WHERE project_id = %s AND revoked_at IS NULL ORDER BY created_at DESC, id DESC" in q:
+            # C-19-9c : live keys only (the revoked rows stay in the table).
             self.state.setdefault("executed_sql", []).append(q)
             columns = ["id", "project_id", "key_prefix", "name", "created_at", "last_used_at", "revoked_at", "revoked"]
-            keys = sorted((k for k in self.state["api_keys"].values() if k["project_id"] == params[0]),
+            keys = sorted((k for k in self.state["api_keys"].values()
+                           if k["project_id"] == params[0] and k["revoked_at"] is None),
                           key=lambda k: k["id"], reverse=True)
             self._set_rows(columns, [(k["id"], k["project_id"], k["key_prefix"], k["name"], k["created_at"],
                                       k["last_used_at"], k["revoked_at"], k["revoked_at"] is not None) for k in keys])
@@ -129,10 +131,11 @@ class KeysApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"id": key_id, "revoked": True})
         self.assertIsNone(accounts.verify_api_key(raw))
+        # C-19-9c : the revoked key leaves the list ; its row (digest · revoked time) stays for the audit trail.
         listed = {k["id"]: k for k in self.client.get("/api/projects/10/keys").json()}
-        self.assertTrue(listed[key_id]["revoked"])
-        self.assertIsNotNone(listed[key_id]["revoked_at"])
+        self.assertEqual(list(listed), [key_id + 1])
         self.assertFalse(listed[key_id + 1]["revoked"])
+        self.assertIsNotNone(self.state["api_keys"][key_id]["revoked_at"])
         self.assertIn(("api_key_revoked", 7), [e[:2] for e in self.state["auth_events"]])
 
     def test_someone_elses_project_and_key_are_404(self):

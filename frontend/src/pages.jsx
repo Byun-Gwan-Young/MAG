@@ -1728,16 +1728,22 @@ export function KeysPage({ user, preview }) {
   const [error, setError] = useState(null);
   const [issued, setIssued] = useState(null);
   const [copied, setCopied] = useState(false);
+  // C-19-9c: a revoked key leaves the list at once (the server lists live keys only; its
+  // revocation record stays in the DB for the audit trail) and one notice says so.
+  const [gone, setGone] = useState([]);
+  const [keyNotice, setKeyNotice] = useState(null);
   const choose = (id) => {
     setChosen(id);
     setIssued(null);
     setError(null);
+    setKeyNotice(null);
   };
   const issue = async (e) => {
     e.preventDefault();
     setBusy(true);
     setError(null);
     setCopied(false);
+    setKeyNotice(null);
     try {
       setIssued(
         await post(`/api/projects/${projectId}/keys`, {
@@ -1761,10 +1767,12 @@ export function KeysPage({ user, preview }) {
     )
       return;
     setError(null);
+    setKeyNotice(null);
     try {
       await post(`/api/keys/${key.id}/revoke`, { csrf_token: user.csrf_token });
       if (issued?.id === key.id) setIssued(null);
-      keys.retry();
+      setGone((ids) => [...ids, key.id]);
+      setKeyNotice(`'${key.name || key.key_prefix}' 키를 폐기했습니다.`);
     } catch (e) {
       setError(e);
     }
@@ -1806,6 +1814,9 @@ export function KeysPage({ user, preview }) {
       </Panel>
     );
   const project = projects.data.find((p) => p.id === projectId);
+  const liveKeys = (keys.data || []).filter(
+    (k) => !k.revoked && !gone.includes(k.id),
+  );
   return (
     <div className="stack">
       <div className="grid-two">
@@ -1880,13 +1891,18 @@ export function KeysPage({ user, preview }) {
       {error && <ErrorBox error={error} />}
       <Panel
         title="발급한 키"
-        subtitle="키 원문은 서버에 남기지 않습니다. 앞자리로만 구분합니다."
+        subtitle="키 원문은 서버에 남기지 않습니다. 앞자리로만 구분합니다. 폐기한 키는 목록에서 사라집니다."
       >
+        {keyNotice && (
+          <p className="notice" role="status">
+            {keyNotice}
+          </p>
+        )}
         {keys.loading ? (
           <Loading />
         ) : keys.error ? (
           <ErrorBox error={keys.error} retry={keys.retry} />
-        ) : keys.data.length ? (
+        ) : liveKeys.length ? (
           <div className="table-wrap">
             <table>
               <thead>
@@ -1895,27 +1911,21 @@ export function KeysPage({ user, preview }) {
                   <th>앞자리</th>
                   <th>만든 날</th>
                   <th>마지막 사용</th>
-                  <th>상태</th>
+                  <th>폐기</th>
                 </tr>
               </thead>
               <tbody>
-                {keys.data.map((k) => (
+                {liveKeys.map((k) => (
                   <tr key={k.id}>
                     <td>{k.name || "—"}</td>
                     <td className="mono">gk_{k.key_prefix}_…</td>
                     <td>{date(k.created_at)}</td>
                     <td>{k.last_used_at ? date(k.last_used_at) : "사용 전"}</td>
                     <td>
-                      {k.revoked ? (
-                        <span className="badge blocked">
-                          폐기 {date(k.revoked_at)}
-                        </span>
-                      ) : (
-                        <button className="danger" onClick={() => revoke(k)}>
-                          <Trash2 size={14} />
-                          폐기
-                        </button>
-                      )}
+                      <button className="danger" onClick={() => revoke(k)}>
+                        <Trash2 size={14} />
+                        폐기
+                      </button>
                     </td>
                   </tr>
                 ))}
