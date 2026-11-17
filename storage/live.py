@@ -987,3 +987,29 @@ def get_session_progress(session_id, after_step):
                 "observations": observations,
                 "judgements": judgements,
             }
+
+
+def get_session_llm_calls(session_id):
+    """C-19-9b : the session's LLM-call token metadata, in call order.
+
+    Only the counted values the gateway already stores (``add_llm_call``) :
+    call index, step, prompt and completion tokens.  A NULL token count means
+    the provider response carried no usage (shown as "측정 안 됨"), never 0.
+    No request/response text exists in ``llm_calls`` to return.
+    """
+
+    session_id = _validate_nonempty(session_id, "session_id")
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            _require_live_session(cursor, session_id)
+            cursor.execute(
+                """
+                SELECT
+                    call_index, step, prompt_tokens, completion_tokens
+                FROM llm_calls
+                WHERE session_id = %s
+                ORDER BY call_index
+                """,
+                (session_id,),
+            )
+            return _rows_dict(cursor)

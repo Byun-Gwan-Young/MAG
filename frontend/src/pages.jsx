@@ -412,6 +412,11 @@ function SessionViewer({ session, api = false, issueDefs }) {
               </span>
             </div>
             <TokenChart steps={rows} />
+            <StepTable
+              steps={rows}
+              selected={step.n}
+              onSelect={(n) => change(rows.findIndex((x) => x.n === n))}
+            />
           </>
         )}
       </Panel>
@@ -462,8 +467,8 @@ function SessionViewer({ session, api = false, issueDefs }) {
                     "도구 호출 / 오류",
                     `${number(step.tools)} / ${number(step.tool_errors)}`,
                   ],
-                  ["이 단계 토큰", number(step.tok)],
-                  ["누적 토큰", number(step.cum)],
+                  ["이번 토큰", tokenText(step.tok)],
+                  ["누적 토큰", tokenText(step.cum)],
                   ["누적 크레딧 (추정)", number(step.cumc)],
                 ]}
               />
@@ -526,23 +531,81 @@ function SessionViewer({ session, api = false, issueDefs }) {
     </>
   );
 }
+// C-19-9b: the cumulative token bar. The first STOP step is marked and the steps after it are a different colour
+// (the tokens a STOP would have saved). A step without a measured value has no bar height and says so.
 function TokenChart({ steps }) {
   const max = Math.max(1, ...steps.map((s) => s.cum || 0));
+  const stop = steps.find((s) => s.stop)?.n;
   return (
     <div className="token-chart">
-      <span className="muted small">단계별 누적 토큰</span>
-      <div className="chart-bars">
+      <span className="muted small">
+        단계별 누적 토큰
+        {stop != null && ` · ${stop}단계 STOP 이후 구간은 회색`}
+      </span>
+      <div className="chart-bars" role="img" aria-label="단계별 누적 토큰 막대">
         {steps.map((s) => (
           <div
             key={s.n}
             style={{ height: `${Math.max(3, ((s.cum || 0) / max) * 100)}%` }}
-            className={s.stop ? "stop-bar" : ""}
-            title={`${s.n}단계 · ${number(s.cum)} 토큰`}
+            className={
+              s.n === stop
+                ? "stop-bar"
+                : stop != null && s.n > stop
+                  ? "after-bar"
+                  : s.cum == null
+                    ? "unmeasured-bar"
+                    : ""
+            }
+            title={`${s.n}단계 · ${s.cum == null ? "측정 안 됨" : `${number(s.cum)} 토큰`}`}
           >
+            {s.n === stop && <b className="stop-mark">STOP</b>}
             <span>{s.n}</span>
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+const tokenText = (v) => (v == null ? "측정 안 됨" : number(v));
+
+// C-19-9b: one row per step : this step's tokens and the running total.
+function StepTable({ steps, selected, onSelect }) {
+  const stop = steps.find((s) => s.stop)?.n;
+  return (
+    <div className="table-wrap step-table">
+      <table>
+        <thead>
+          <tr>
+            <th>단계</th>
+            <th>역할</th>
+            <th>판정</th>
+            <th>이번 토큰</th>
+            <th>누적 토큰</th>
+          </tr>
+        </thead>
+        <tbody>
+          {steps.map((s) => (
+            <tr
+              key={s.n}
+              className={
+                (s.n === selected ? "selected " : "") +
+                (stop != null && s.n > stop ? "after-stop" : "")
+              }
+            >
+              <td>
+                <button className="table-link" onClick={() => onSelect(s.n)}>
+                  {s.n}
+                </button>
+              </td>
+              <td>{s.role || s.agent || "—"}</td>
+              <td>{s.stop ? "STOP" : s.label || s.state || "—"}</td>
+              <td className="mono">{tokenText(s.tok)}</td>
+              <td className="mono">{tokenText(s.cum)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

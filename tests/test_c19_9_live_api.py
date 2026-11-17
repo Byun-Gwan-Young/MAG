@@ -51,6 +51,16 @@ PROGRESS = {'p10-run-a': {'observations': [observation(n) for n in range(1, 4)],
             'p20-theirs': {'observations': [], 'judgements': []}}
 
 
+# C-19-9b : the gateway's LLM-call rows per session (storage.live.get_session_llm_calls) ; none by default.
+CALLS = {}
+
+
+def llm_calls(session_id):
+    if session_id not in PROGRESS:
+        raise LookupError('live session not found')
+    return CALLS.get(session_id, [])
+
+
 @contextmanager
 def no_db():
     yield object()
@@ -82,6 +92,9 @@ class LiveApiTests(unittest.TestCase):
                                      if target == 'live.get_session_progress' else (live_router, target)), value)
             patcher.start()
             self.addCleanup(patcher.stop)
+        calls = patch.object(live_router.live, 'get_session_llm_calls', llm_calls)
+        calls.start()
+        self.addCleanup(calls.stop)
         state = patch('backend.auth.service.fetch_account_state', return_value={
             'account_status': 'active', 'can_restore': None, 'deletion_requested_at': None, 'deletion_due_at': None})
         state.start()

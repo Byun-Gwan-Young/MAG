@@ -965,6 +965,39 @@ footer {
 .chart-bars .stop-bar {
   background: var(--stop);
 }
+/* C-19-9b: the steps after the first STOP (tokens a STOP would have saved) and steps without a measured value. */
+.chart-bars .after-bar {
+  background: var(--after);
+  background-image: repeating-linear-gradient(
+    135deg,
+    transparent 0 4px,
+    var(--line-soft) 4px 6px
+  );
+}
+.chart-bars .unmeasured-bar {
+  background: var(--unm);
+  outline: 1px dashed var(--line-strong);
+}
+.chart-bars .stop-mark {
+  position: absolute;
+  top: -15px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 8px;
+  color: var(--stop);
+  white-space: nowrap;
+}
+.step-table {
+  border-top: 1px solid var(--line-soft);
+  max-height: 360px;
+  overflow: auto;
+}
+.step-table tr.selected td {
+  background: var(--selected);
+}
+.step-table tr.after-stop td {
+  color: var(--muted);
+}
 .chart-bars span {
   position: absolute;
   bottom: -18px;

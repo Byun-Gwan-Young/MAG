@@ -92,7 +92,11 @@ export function stepFromApi(f, roles = {}) {
       : null,
     changed: f.changed_paths?.length || 0,
     paths: f.changed_paths || [],
-    tok: (f.tokens?.prompt || 0) + (f.tokens?.completion || 0),
+    // C-19-9b: a step whose turns lacked usage is "측정 안 됨" (null), not a partial count.
+    tok:
+      f.tokens == null || f.usage_missing_turns > 0
+        ? null
+        : (f.tokens.prompt || 0) + (f.tokens.completion || 0),
     cum: f.cumulative_tokens,
     cumc: f.cumulative_credits,
     tools: f.tools?.length || 0,

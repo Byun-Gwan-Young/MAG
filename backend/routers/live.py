@@ -77,6 +77,41 @@ def _progress(session_id):
         return None
 
 
+def _calls(session_id):
+    """C-19-9b : the session's LLM-call token counts (storage.live.get_session_llm_calls), [] when there are none."""
+    try:
+        return live.get_session_llm_calls(session_id)
+    except LookupError:
+        return []
+
+
+def _step_tokens(calls):
+    """{step: tokens} from the gateway's LLM-call rows : prompt + completion summed over the step's calls. A step
+    with any call whose response carried no usage is None ("측정 안 됨"), never a partial sum or 0."""
+    per = {}
+    for call in calls or []:
+        step = call.get("step")
+        if step is None:
+            continue
+        prompt, completion = call.get("prompt_tokens"), call.get("completion_tokens")
+        tokens = None if prompt is None or completion is None else prompt + completion
+        before = per.get(step, 0)
+        per[step] = None if before is None or tokens is None else before + tokens
+    return per
+
+
+def _add_tokens(rows, calls):
+    """The step table's "이번 토큰 · 누적 토큰" (tok, cum) for gateway rows. A step with no recorded call or no usage
+    is None, and the running total stops there (None from then on) : a known subtotal is never shown as the total."""
+    per = _step_tokens(calls)
+    total = 0
+    for row in rows:
+        row["tok"] = per.get(row["n"])
+        total = None if total is None or row["tok"] is None else total + row["tok"]
+        row["cum"] = total
+    return rows
+
+
 def _step_row(observation, judgement):
     data = (observation or {}).get("observation_data") or {}
     result = (judgement or {}).get("result_data") or {}
@@ -104,11 +139,11 @@ def _step_row(observation, judgement):
             "blocked": False, "status": "completed", "fail": [], "tests": tests, "report": report, "claim": None,
             "tools": 0, "tool_errors": 0, "changed": len(t3.get("changed_paths") or []),
             "paths": list(t3.get("changed_paths") or []),
-            # Per-step tokens are not readable from the DB yet (no llm_calls reader in storage.live) : null, not 0.
+            # Filled from the LLM-call rows by _add_tokens (C-19-9b) ; credits are not estimated for gateway sessions.
             "tok": None, "cum": None, "cumc": None}
 
 
-def _view(project, row, progress, now):
+def _view(project, row, progress, now, calls=()):
     """One session in the shape of tools/demo_live.session_view (the screen's session plus live fields)."""
     judgements = {j["step"]: j for j in (progress or {}).get("judgements") or []}
     observations = {o["step"]: o for o in (progress or {}).get("observations") or []}
@@ -125,6 +160,7 @@ def _view(project, row, progress, now):
         rows.append({"n": blocked, "agent": None, "role": None, "state": None, "label": "차단 (403)", "stop": None,
                      "blocked": True, "status": "blocked", "fail": [], "tests": None, "report": None, "claim": None,
                      "tools": 0, "tool_errors": 0, "changed": 0, "paths": [], "tok": None, "cum": None, "cumc": None})
+    _add_tokens(rows, calls)
     times = [o.get("observed_at") for o in observations.values() if o.get("observed_at")]
     times += [row["started_at"]] if row.get("started_at") else []
     last = max(times) if times else None
@@ -137,7 +173,8 @@ def _view(project, row, progress, now):
         "project_id": project["id"], "provider": project.get("provider"),
         "mode": row["guardrail_mode"], "class": _class(reason), "termination": reason, "escalated_by": None,
         "escalated_by_label": None, "steps": len([r for r in rows if not r["blocked"]]), "max_steps": None,
-        "tokens": row["total_tokens"], "credits": None,
+        # An ended session has the gateway's total ; a running one shows the running total so far (or None).
+        "tokens": row["total_tokens"] if ended else (rows[-1]["cum"] if rows else None), "credits": None,
         "first_stop": first["n"] if first else None, "template": first["stop"]["t"] if first else None,
         "stop_text": first["stop"]["text"] if first else None, "stop_steps": stops, "blocked_step": blocked,
         "if_stopped": None, "started_at": _iso(row.get("started_at")), "account": None, "plan": None,
@@ -165,7 +202,7 @@ def sessions(limit: int = Query(LIST_LIMIT, ge=1, le=50), user=Depends(get_curre
                 for row in fetch_sessions(conn, project["id"], limit, 0, user["id"])["items"]:
                     found.append((project, row))
         found.sort(key=lambda pr: (pr[1]["started_at"], pr[1]["id"]), reverse=True)
-        views = [_view(project, row, _progress(row["id"]), now) for project, row in found[:limit]]
+        views = [_view(project, row, _progress(row["id"]), now, _calls(row["id"])) for project, row in found[:limit]]
     except DatabaseError:
         raise HTTPException(503, "Database unavailable") from None
     items = [{**{k: v[k] for k in LIST_KEYS}, "live": {k: v["live"][k] for k in ("status", "updated_at",
@@ -184,9 +221,10 @@ def session(session_id: str = Path(..., min_length=1, max_length=200), user=Depe
         if match is None:
             raise HTTPException(404, "Session not found")
         progress = _progress(session_id)
+        calls = _calls(session_id)
     except DatabaseError:
         raise HTTPException(503, "Database unavailable") from None
     if progress is None:
         raise HTTPException(404, "Session not found")
     now = _now()
-    return _guarded({"version": LIVE_VERSION, "now": _iso(now), "session": _view(*match, progress, now)})
+    return _guarded({"version": LIVE_VERSION, "now": _iso(now), "session": _view(*match, progress, now, calls)})

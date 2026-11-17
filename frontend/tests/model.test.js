@@ -75,3 +75,20 @@ test("API adapters preserve zero values, missing measurements, and server roles"
     null,
   );
 });
+test("C-19-9b: a step whose turns lacked usage has no token count", () => {
+  const measured = stepFromApi({
+    step_id: 1,
+    tokens: { prompt: 10, completion: 4 },
+    usage_missing_turns: 0,
+    cumulative_tokens: 14,
+  });
+  assert.equal(measured.tok, 14);
+  assert.equal(measured.cum, 14);
+  const missing = stepFromApi({
+    step_id: 2,
+    tokens: { prompt: 10, completion: 0 },
+    usage_missing_turns: 1,
+    cumulative_tokens: 24,
+  });
+  assert.equal(missing.tok, null);
+});
