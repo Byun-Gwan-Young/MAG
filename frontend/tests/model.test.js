@@ -92,3 +92,10 @@ test("C-19-9b: a step whose turns lacked usage has no token count", () => {
   });
   assert.equal(missing.tok, null);
 });
+test("C-19-9b: the basis line passes through from the API", () => {
+  assert.equal(
+    stepFromApi({ step_id: 1, basis: "파일 변화 없음" }).basis,
+    "파일 변화 없음",
+  );
+  assert.equal(stepFromApi({ step_id: 1 }).basis, null);
+});

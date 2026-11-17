@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from fastapi.responses import JSONResponse
 from psycopg import Error as DatabaseError
 
+from service import basis
 from storage import accounts, live
 from storage.safety import forbidden_fields, secret_hits
 
@@ -147,7 +148,8 @@ def _view(project, row, progress, now, calls=()):
     """One session in the shape of tools/demo_live.session_view (the screen's session plus live fields)."""
     judgements = {j["step"]: j for j in (progress or {}).get("judgements") or []}
     observations = {o["step"]: o for o in (progress or {}).get("observations") or []}
-    rows = [_step_row(observations.get(n), judgements.get(n)) for n in sorted(set(judgements) | set(observations))]
+    steps = sorted(set(judgements) | set(observations))
+    rows = [_step_row(observations.get(n), judgements.get(n)) for n in steps]
     stops = [r["n"] for r in rows if r["stop"]]
     first = next((r for r in rows if r["stop"]), None)
     ended = row["status"] == "ended"
@@ -161,6 +163,11 @@ def _view(project, row, progress, now, calls=()):
                      "blocked": True, "status": "blocked", "fail": [], "tests": None, "report": None, "claim": None,
                      "tools": 0, "tool_errors": 0, "changed": 0, "paths": [], "tok": None, "cum": None, "cumc": None})
     _add_tokens(rows, calls)
+    # C-19-9b part 2 : one basis line per step from the recorded signal values (service/basis.py).
+    results = [((judgements.get(r["n"]) or {}).get("result_data") or {}) if not r["blocked"] else {} for r in rows]
+    shapes = [basis.from_live(r, res.get("progress"), res.get("criteria")) for r, res in zip(rows, results)]
+    for r, text in zip(rows, basis.annotate(shapes)):
+        r["basis"] = text
     times = [o.get("observed_at") for o in observations.values() if o.get("observed_at")]
     times += [row["started_at"]] if row.get("started_at") else []
     last = max(times) if times else None

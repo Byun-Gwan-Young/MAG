@@ -181,8 +181,12 @@ class Api(unittest.TestCase):
     def test_steps_are_the_replay_steps(self):
         body = self.client.get(f'/api/sessions/{SESSION}/steps').json()
         replay = load(f'{load_demo.RUNS}/{SESSION}/record/replay.json')['steps']
-        self.assertEqual([{k: v for k, v in s.items() if k != 'judgement'} for s in body['steps']], replay)
+        # C-19-9b adds one field, the basis line ; everything else is replay.json as recorded.
+        self.assertEqual([{k: v for k, v in s.items() if k not in ('judgement', 'basis')} for s in body['steps']],
+                         replay)
         self.assertEqual(body['steps'][17]['stop']['text'], replay[17]['stop']['text'])
+        self.assertEqual(body['steps'][17]['basis'], replay[17]['stop']['text'])
+        self.assertTrue(all(isinstance(s['basis'], str) and s['basis'] for s in body['steps']))
         self.assertIsInstance(body['steps'][0]['judgement']['judgement_ns'], int)
 
     def test_scenarios(self):

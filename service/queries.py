@@ -9,6 +9,12 @@ import json
 import math
 from pathlib import Path
 import statistics
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from service import basis  # noqa: E402
 
 # reports/c19/final-report.md section 4 (DM-85 ①). tests/test_service_demo_db.py checks these against that text.
 REPORT_SECTION4 = {
@@ -574,7 +580,13 @@ def _steps_unified(store, session_id):
         j = judgements.get(fact.get('step_id')) or {}
         result.append({**fact, 'judgement': {'judgement_ns': j.get('judgement_ns'), 'reason': j.get('reason'),
                                              'consecutive_steps': j.get('stagnant_run')}})
-    return result
+    return with_basis(result)
+
+
+def with_basis(steps):
+    """C-19-9b part 2 : each step with its basis line (service/basis.py), read from the recorded values only."""
+    lines = basis.annotate([basis.from_replay(s) for s in steps])
+    return [{**s, 'basis': text} for s, text in zip(steps, lines)]
 
 
 def summary(store):
@@ -640,5 +652,5 @@ def steps(store, session_id):
         return _steps_unified(store, session_id)
     rows = store.query('SELECT step_id, facts, judgement_ns, criteria_reason, consecutive_steps FROM steps '
                        'WHERE session_id = ? ORDER BY step_id', [session_id])
-    return [{**r['facts'], 'judgement': {'judgement_ns': r['judgement_ns'], 'reason': r['criteria_reason'],
-                                         'consecutive_steps': r['consecutive_steps']}} for r in rows]
+    return with_basis([{**r['facts'], 'judgement': {'judgement_ns': r['judgement_ns'], 'reason': r['criteria_reason'],
+                                                    'consecutive_steps': r['consecutive_steps']}} for r in rows])

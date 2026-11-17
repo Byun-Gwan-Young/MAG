@@ -427,6 +427,11 @@ function SessionViewer({ session, api = false, issueDefs }) {
         >
           <div className="step-layout">
             <div>
+              {step.basis && !step.stop && (
+                <p className="basis-line">
+                  <b>판정 근거</b> {step.basis}
+                </p>
+              )}
               {step.stop && (
                 <div className="stop-message">
                   <b>STOP · {step.stop.t}</b>
@@ -569,7 +574,8 @@ function TokenChart({ steps }) {
 
 const tokenText = (v) => (v == null ? "측정 안 됨" : number(v));
 
-// C-19-9b: one row per step : this step's tokens and the running total.
+// C-19-9b: one row per step : this step's tokens, the running total and the basis line (why the step was judged as
+// it was, built on the server from recorded signal values).
 function StepTable({ steps, selected, onSelect }) {
   const stop = steps.find((s) => s.stop)?.n;
   return (
@@ -582,6 +588,7 @@ function StepTable({ steps, selected, onSelect }) {
             <th>판정</th>
             <th>이번 토큰</th>
             <th>누적 토큰</th>
+            <th>판정 근거</th>
           </tr>
         </thead>
         <tbody>
@@ -602,6 +609,7 @@ function StepTable({ steps, selected, onSelect }) {
               <td>{s.stop ? "STOP" : s.label || s.state || "—"}</td>
               <td className="mono">{tokenText(s.tok)}</td>
               <td className="mono">{tokenText(s.cum)}</td>
+              <td className="basis">{s.basis || "—"}</td>
             </tr>
           ))}
         </tbody>

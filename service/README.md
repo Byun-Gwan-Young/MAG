@@ -9,6 +9,9 @@
 - 기존 `service/load_demo.py rows` / `check --offline`: 커밋된 데모 파일의 독립 검증용으로 유지
 - `service.load_demo schema` / `load`: DB 통합 후 퇴역. 실행하면 쓰기 전에 명확하게 거절됨
 - narrative · reasoning 본문 · API key 원문은 DB/응답에 내보내지 않음
+- `service/basis.py` (C-19-9b, DM-120): step 마다 "판정 근거" 한 줄. 기록된 신호값 (상태 · 연속 횟수 · 테스트 ·
+  파일 · 쟁점 · 채택 · 처리 상태) 으로만 만들고 LLM 을 부르지 않으며 판정 · STOP 문장 (explain-v1) 을 바꾸지 않는다.
+  STOP 단계는 기록된 원인 문장 그대로. `GET /api/sessions/{id}/steps` 와 실시간 API (`backend/routers/live.py`) 가 쓴다
 
 ## 현재 흐름
 

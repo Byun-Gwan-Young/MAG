@@ -1,6 +1,7 @@
 """C-19-9b (DM-120) : the live monitor additions. Offline only (fake upstream, fake DB rows, no LLM call).
 
 Part 1 : per-step and cumulative tokens from the gateway's LLM-call rows ("측정 안 됨" when usage is missing).
+Part 2 : the basis line (service/basis.py) for each signal combination, in the live API and the demo steps API.
 """
 from contextlib import contextmanager
 import os
@@ -12,7 +13,7 @@ from unittest import mock
 import httpx
 
 from backend.routers import live as live_router
-from service import gateway
+from service import basis, gateway
 from storage import live
 import test_c19_9_live_api as live_api
 from test_c19_9_gateway import DEMO_MODEL, KMU_URL, FakeLive, fake_accounts
@@ -141,6 +142,107 @@ class GatewayTokenTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status_code, 200, response.text)
         calls = [(a[1], a[2], a[4], a[5]) for a in self.live.named('add_llm_call')]
         self.assertEqual(calls, [(1, 1, 30, 7), (2, 2, None, None)])
+
+
+
+def shape(n, agent='developer', state='stagnant', **values):
+    return basis.step_shape(n=n, agent=agent, state=state, **values)
+
+
+class BasisLineTests(unittest.TestCase):
+    """One case per signal combination. Every value comes from the step shape ; nothing is read from text."""
+
+    def test_threshold_is_the_frozen_consecutive_steps(self):
+        self.assertEqual(basis.threshold(), 3)
+        self.assertIsNone(basis.threshold('/nonexistent.json'))
+
+    def test_progress_names_what_is_new(self):
+        previous = shape(1, state='baseline', tests=[14, 16], paths=[], issue_ids=['ownership', 'sort'], adopted=3)
+        now = shape(4, state='progress', tests=[15, 16], paths=['a.py', 'b.py'], issue_ids=['sort'], adopted=4)
+        self.assertEqual(basis.line(now, previous, 3),
+                         '새 파일 내용 2 개 · 통과 테스트 14 → 15 · 쟁점 ownership 닫힘 · 채택 3 → 4')
+
+    def test_progress_of_a_dialogue_names_the_status_and_new_issues(self):
+        previous = shape(1, state='baseline', status='접수', issue_ids=['a'])
+        now = shape(4, state='progress', status='분류', issue_ids=['a', 'b'])
+        self.assertEqual(basis.line(now, previous, 3), "새 쟁점 b · 처리 상태 '접수' → '분류'")
+
+    def test_progress_without_a_fact_difference_reads_the_judge_events(self):
+        now = shape(5, state='progress', paths=[], tests=[7, 17],
+                    events=[{'metric': 'artifact.files_changed', 'item': 'SPEC.md', 'kind': 'new'},
+                            {'metric': 'conversation.open_issues_count', 'item': 'requirements', 'kind': 'closed'}])
+        self.assertEqual(basis.line(now, shape(2, tests=[7, 17], paths=[]), 3),
+                         '새 파일 내용 1 개 (이 역할의 직전 관측 기준) · 쟁점 requirements 닫힘')
+        self.assertEqual(basis.line(shape(5, state='progress'), None, 3),
+                         '진전 : 신호가 바뀌었지만 세부 변화는 기록되지 않았습니다')
+
+    def test_stagnant_names_what_stayed_and_the_counter(self):
+        previous = shape(1, tests=[14, 15], paths=[], issue_ids=['a'])
+        now = shape(4, tests=[14, 15], paths=[], issue_ids=['a'], consecutive=2)
+        self.assertEqual(basis.line(now, previous, 3),
+                         '파일 변화 없음 · 통과 테스트 14/15 그대로 · 새 쟁점 없음 → 진전 없는 차례 2/3')
+
+    def test_stagnant_with_file_changes_but_no_new_test_maximum(self):
+        now = shape(7, tests=[16, 17], paths=['src/x.py'], consecutive=1)
+        self.assertEqual(basis.line(now, None, 3), '파일 1 개 바뀌었지만 · 통과 테스트 16/17 그대로 → 진전 없는 차례 1/3')
+
+    def test_stagnant_dialogue_reports_status_and_adopted(self):
+        now = shape(9, status='분류', adopted=2, issue_ids=['x'], consecutive=3)
+        self.assertEqual(basis.line(now, shape(6, issue_ids=['x']), 3),
+                         "새 쟁점 없음 · 처리 상태 '분류' 그대로 · 채택 2 그대로 → 진전 없는 차례 3/3")
+
+    def test_oscillating_names_what_went_back(self):
+        now = shape(8, state='oscillating', tests=[12, 16], revert_to=3, consecutive=2,
+                    events=[{'metric': 'conversation.open_issues_count', 'item': 'ownership', 'kind': 'reopen'}])
+        self.assertEqual(basis.line(now, None, 3), '되돌림 : 파일 상태가 3단계 내용으로 돌아감 · ownership 예전 값으로 돌아감 · '
+                                                    '통과 테스트 12/16 → 진전 없는 차례 2/3')
+        self.assertEqual(basis.line(shape(8, state='oscillating'), None, 3), '되돌림 : 예전 상태로 돌아감')
+
+    def test_baseline_and_unmeasured_say_why(self):
+        self.assertEqual(basis.line(shape(1, state='baseline'), None, 3),
+                         '기준점 : 이 역할의 첫 관측이라 비교할 이전 기록이 없습니다')
+        self.assertTrue(basis.line(shape(4, state='baseline'), shape(1), 3).startswith('기준점 : 비교 기준을 새로'))
+        self.assertEqual(basis.line(shape(4, state='unmeasured', reason='metric selection changed'), None, 3),
+                         '측정 불가 : 이전 관측과 지표 구성이 달라 비교할 수 없습니다')
+        self.assertEqual(basis.line(shape(4, state='unmeasured', unmeasured_metrics=[
+            'artifact.test_pass_count', 'artifact.files_changed']), None, 3),
+            '측정 불가 : 통과 테스트 · 파일 변화 값을 측정하지 못했습니다')
+        self.assertEqual(basis.line(shape(4, state='unmeasured'), None, 3),
+                         '측정 불가 : 판정에 필요한 관측값이 기록되지 않았습니다')
+        self.assertEqual(basis.line(shape(4, state=None), None, 3), '판정 기록 없음')
+
+    def test_stop_keeps_the_recorded_sentence_and_block_names_the_403(self):
+        stop = '최근 3 step 동안 역할 모두 진전이 없습니다. 통과 테스트 7/16.'
+        self.assertEqual(basis.line(shape(9, stop_text=stop, consecutive=3), None, 3), stop)
+        self.assertTrue(basis.line(shape(10, state=None, blocked=True), None, 3).startswith('차단 : '))
+
+    def test_annotate_compares_with_the_same_role(self):
+        steps = [shape(1, 'planner', 'baseline', issue_ids=['a', 'b']), shape(2, 'developer', 'baseline', tests=[1, 4]),
+                 shape(3, 'planner', 'progress', issue_ids=['b']), shape(4, 'developer', 'progress', tests=[2, 4])]
+        self.assertEqual(basis.annotate(steps, 3)[2:], ['쟁점 a 닫힘', '통과 테스트 1 → 2'])
+
+    def test_adapters_read_the_recorded_shapes(self):
+        live_row = {'n': 7, 'agent': 'developer', 'state': 'stagnant', 'stop': None, 'blocked': False,
+                    'tests': [7, 16], 'paths': [], 'report': {'status': 's', 'adopted': ['x', 'y'],
+                                                             'issue_ids': ['a']}}
+        one = basis.from_live(live_row, {'state': 'stagnant', 't3': {'changed_paths': []}},
+                              {'decision': 'continue', 'consecutive_steps': 2})
+        self.assertEqual((one['tests'], one['paths'], one['adopted'], one['consecutive']), ((7, 16), [], 2, 2))
+        fact = {'step_id': 3, 'agent': 'planner', 'state': 'stagnant', 'tests': {'passed': 5, 'total': 9},
+                'changed_paths': [], 'report': {'status_label': '분류', 'adopted_items': 1, 'open_issue_ids': []},
+                'judgement': {'consecutive_steps': 1}}
+        two = basis.from_replay(fact)
+        self.assertEqual((two['tests'], two['status'], two['issue_ids'], two['consecutive']), ((5, 9), '분류', [], 1))
+
+
+class LiveApiBasisTests(LiveApiTokenTests):
+    def test_live_rows_carry_the_basis_line(self):
+        self.sign_in(7)
+        rows = self.client.get('/api/live/sessions/p10-run-a').json()['session']['step_rows']
+        self.assertEqual(rows[0]['basis'], '기준점 : 이 역할의 첫 관측이라 비교할 이전 기록이 없습니다')
+        self.assertTrue(rows[1]['basis'].startswith('파일 변화 없음 · 통과 테스트 7/16 그대로 · 새 쟁점 없음'))
+        self.assertEqual(rows[2]['basis'], live_api.STOP_TEXT)
+        self.assertTrue(rows[3]['basis'].startswith('차단 : '))
 
 
 if __name__ == '__main__':

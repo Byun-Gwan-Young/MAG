@@ -98,6 +98,7 @@ export function stepFromApi(f, roles = {}) {
         ? null
         : (f.tokens.prompt || 0) + (f.tokens.completion || 0),
     cum: f.cumulative_tokens,
+    basis: f.basis || null,
     cumc: f.cumulative_credits,
     tools: f.tools?.length || 0,
     tool_errors: f.tools?.filter((x) => x.is_error).length || 0,

@@ -998,6 +998,23 @@ footer {
 .step-table tr.after-stop td {
   color: var(--muted);
 }
+.step-table td.basis {
+  min-width: 260px;
+  white-space: normal;
+  line-height: 1.45;
+}
+.basis-line {
+  margin: 0 20px 14px;
+  padding: 10px 12px;
+  background: var(--tint);
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  font-size: 12px;
+}
+.basis-line b {
+  margin-right: 6px;
+  color: var(--state-fg);
+}
 .chart-bars span {
   position: absolute;
   bottom: -18px;
