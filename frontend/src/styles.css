@@ -989,8 +989,7 @@ footer {
 }
 .step-table {
   border-top: 1px solid var(--line-soft);
-  max-height: 360px;
-  overflow: auto;
+  overflow-x: auto;
 }
 .step-table tr.selected td {
   background: var(--selected);
@@ -1866,5 +1865,47 @@ footer {
 @media (max-width: 720px) {
   .step-expanded dl {
     grid-template-columns: 1fr;
+  }
+}
+
+/* C-19-9b: at phone width each step row is a stacked card (no sideways scrolling, opened rows fit the screen). */
+@media (max-width: 720px) {
+  .step-table thead {
+    display: none;
+  }
+  .step-table table,
+  .step-table tbody,
+  .step-table tr,
+  .step-table td {
+    display: block;
+    width: 100%;
+  }
+  .step-table tr {
+    position: relative;
+    padding: 10px 15px;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .step-table td {
+    padding: 2px 0;
+    border: 0;
+  }
+  .step-table td[data-label]::before {
+    content: attr(data-label);
+    display: inline-block;
+    width: 80px;
+    color: var(--muted);
+    font-size: 11px;
+  }
+  .step-table td.basis {
+    min-width: 0;
+  }
+  .step-table td.expand {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    width: auto;
+  }
+  .step-table tr.step-expanded td {
+    padding: 4px 0;
   }
 }

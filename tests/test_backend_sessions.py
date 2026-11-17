@@ -86,6 +86,8 @@ class BackendTests(unittest.TestCase):
             INSERT INTO projects VALUES (2, 'Empty', 'observe', 'deadlock-v0.3', '2026-10-12T00:00:00+00:00', 1);
             -- C-19-8P : the project list shows the provider id (storage/schema.sql has projects.provider).
             ALTER TABLE projects ADD COLUMN provider TEXT NOT NULL DEFAULT 'kmu';
+            -- C-19-9b : the project list shows the utterance log setting (off by default, storage/schema.sql).
+            ALTER TABLE projects ADD COLUMN utterance_log BOOLEAN NOT NULL DEFAULT 0;
             CREATE TABLE scenarios (id INTEGER PRIMARY KEY, project_id INTEGER);
             CREATE TABLE sessions (
                 id TEXT PRIMARY KEY, scenario_id INTEGER, status TEXT,

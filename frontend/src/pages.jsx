@@ -623,17 +623,25 @@ function StepTable({ steps, selected, onSelect, utteranceLog }) {
                   (stop != null && s.n > stop ? "after-stop" : "")
                 }
               >
-                <td>
+                <td data-label="단계">
                   <button className="table-link" onClick={() => onSelect(s.n)}>
                     {s.n}
                   </button>
                 </td>
-                <td>{s.role || s.agent || "—"}</td>
-                <td>{s.stop ? "STOP" : s.label || s.state || "—"}</td>
-                <td className="mono">{tokenText(s.tok)}</td>
-                <td className="mono">{tokenText(s.cum)}</td>
-                <td className="basis">{s.basis || "—"}</td>
-                <td>
+                <td data-label="역할">{s.role || s.agent || "—"}</td>
+                <td data-label="판정">
+                  {s.stop ? "STOP" : s.label || s.state || "—"}
+                </td>
+                <td data-label="이번 토큰" className="mono">
+                  {tokenText(s.tok)}
+                </td>
+                <td data-label="누적 토큰" className="mono">
+                  {tokenText(s.cum)}
+                </td>
+                <td data-label="판정 근거" className="basis">
+                  {s.basis || "—"}
+                </td>
+                <td className="expand">
                   <button
                     className="icon-button"
                     aria-expanded={open.has(s.n)}
