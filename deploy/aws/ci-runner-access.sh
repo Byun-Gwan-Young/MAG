@@ -15,8 +15,20 @@ set -euo pipefail
 STATE=${RUNNER_TEMP:-${TMPDIR:-/tmp}}/guardrail-runner-ip
 die() { printf 'stop : %s\n' "$*" >&2; exit 1; }
 
-[[ "${AWS_SECURITY_GROUP_ID:-}" =~ ^sg-[0-9a-f]{8,17}$ ]] || die "AWS_SECURITY_GROUP_ID is not set or not a security group ID"
-[[ "${AWS_REGION:-}" =~ ^[a-z]{2}(-[a-z]+)+-[0-9]$ ]] || die "AWS_REGION is not set or not a region name"
+# A value pasted into a GitHub secret can carry a trailing newline : trim white space at both ends only (a space inside still fails).
+AWS_SECURITY_GROUP_ID=${AWS_SECURITY_GROUP_ID:-}
+AWS_SECURITY_GROUP_ID=${AWS_SECURITY_GROUP_ID#"${AWS_SECURITY_GROUP_ID%%[![:space:]]*}"}
+AWS_SECURITY_GROUP_ID=${AWS_SECURITY_GROUP_ID%"${AWS_SECURITY_GROUP_ID##*[![:space:]]}"}
+AWS_REGION=${AWS_REGION:-}
+AWS_REGION=${AWS_REGION#"${AWS_REGION%%[![:space:]]*}"}
+AWS_REGION=${AWS_REGION%"${AWS_REGION##*[![:space:]]}"}
+# `close` with nothing opened (the job stopped before `open`) has nothing to check or remove.
+if [[ "${1:-}" == close && ! -f "$STATE" ]]; then
+    printf 'no rule was opened by this job : nothing to close\n'
+    exit 0
+fi
+[[ "$AWS_SECURITY_GROUP_ID" =~ ^sg-[0-9a-f]{8,17}$ ]] || die "AWS_SECURITY_GROUP_ID is not set or not a security group ID"
+[[ "$AWS_REGION" =~ ^[a-z]{2}(-[a-z]+)+-[0-9]$ ]] || die "AWS_REGION is not set or not a region name"
 
 valid_single_ip() {
     [[ "$1" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]] || return 1

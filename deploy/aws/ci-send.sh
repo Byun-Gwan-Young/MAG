@@ -20,7 +20,11 @@ BUNDLE=${1:-}
 [[ -f "$BUNDLE" && -s "$BUNDLE" ]] || die "no bundle file"
 [[ -n "${DEPLOY_SSH_KEY:-}" ]] || die "DEPLOY_SSH_KEY is not set"
 [[ -n "${DEPLOY_KNOWN_HOSTS:-}" ]] || die "DEPLOY_KNOWN_HOSTS is not set"
-[[ "${DEPLOY_HOST:-}" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$ ]] || die "DEPLOY_HOST is not set or not a host name or address"
+# A pasted secret can end in a newline : trim white space at both ends only (no echo of the value).
+DEPLOY_HOST=${DEPLOY_HOST:-}
+DEPLOY_HOST=${DEPLOY_HOST#"${DEPLOY_HOST%%[![:space:]]*}"}
+DEPLOY_HOST=${DEPLOY_HOST%"${DEPLOY_HOST##*[![:space:]]}"}
+[[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$ ]] || die "DEPLOY_HOST is not set or not a host name or address"
 
 work=$(umask 077 && mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/guardrail-send.XXXXXX")
 trap 'rm -rf "$work"' EXIT
