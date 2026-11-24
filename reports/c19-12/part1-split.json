@@ -1,0 +1,194 @@
+{
+ "seed": 20261125,
+ "splits": {
+  "train": {
+   "sessions": 72,
+   "pairs": 873,
+   "progress": 276,
+   "repeat": 597
+  },
+  "test": {
+   "sessions": 10,
+   "pairs": 80,
+   "progress": 33,
+   "repeat": 47
+  },
+  "test-nc": {
+   "sessions": 7,
+   "pairs": 102,
+   "progress": 16,
+   "repeat": 86
+  }
+ },
+ "by_split_task": {
+  "train DEMO-CL": {
+   "sessions": 11,
+   "pairs": 171,
+   "progress": 71,
+   "repeat": 100
+  },
+  "train DEMO-CS": {
+   "sessions": 18,
+   "pairs": 116,
+   "progress": 32,
+   "repeat": 84
+  },
+  "train DEMO-CT": {
+   "sessions": 11,
+   "pairs": 193,
+   "progress": 75,
+   "repeat": 118
+  },
+  "train DEMO-CT-N": {
+   "sessions": 1,
+   "pairs": 1,
+   "progress": 1,
+   "repeat": 0
+  },
+  "train DEMO-LR": {
+   "sessions": 12,
+   "pairs": 151,
+   "progress": 42,
+   "repeat": 109
+  },
+  "train DEMO-MR": {
+   "sessions": 19,
+   "pairs": 241,
+   "progress": 55,
+   "repeat": 186
+  },
+  "test DEMO-CL": {
+   "sessions": 3,
+   "pairs": 33,
+   "progress": 8,
+   "repeat": 25
+  },
+  "test DEMO-CS": {
+   "sessions": 2,
+   "pairs": 2,
+   "progress": 2,
+   "repeat": 0
+  },
+  "test DEMO-CT": {
+   "sessions": 3,
+   "pairs": 41,
+   "progress": 19,
+   "repeat": 22
+  },
+  "test DEMO-LR": {
+   "sessions": 1,
+   "pairs": 1,
+   "progress": 1,
+   "repeat": 0
+  },
+  "test DEMO-MR": {
+   "sessions": 1,
+   "pairs": 3,
+   "progress": 3,
+   "repeat": 0
+  },
+  "test-nc DEMO-CS": {
+   "sessions": 3,
+   "pairs": 31,
+   "progress": 5,
+   "repeat": 26
+  },
+  "test-nc DEMO-LR": {
+   "sessions": 1,
+   "pairs": 3,
+   "progress": 3,
+   "repeat": 0
+  },
+  "test-nc DEMO-MR": {
+   "sessions": 3,
+   "pairs": 68,
+   "progress": 8,
+   "repeat": 60
+  }
+ },
+ "by_split_task_variant": {
+  "train DEMO-CS normal": {
+   "sessions": 5,
+   "pairs": 12,
+   "progress": 12,
+   "repeat": 0
+  },
+  "train DEMO-CS stall": {
+   "sessions": 7,
+   "pairs": 98,
+   "progress": 15,
+   "repeat": 83
+  },
+  "train DEMO-LR stall": {
+   "sessions": 5,
+   "pairs": 135,
+   "progress": 27,
+   "repeat": 108
+  },
+  "train DEMO-MR normal": {
+   "sessions": 4,
+   "pairs": 15,
+   "progress": 14,
+   "repeat": 1
+  },
+  "train DEMO-MR stall": {
+   "sessions": 6,
+   "pairs": 136,
+   "progress": 22,
+   "repeat": 114
+  },
+  "test-nc DEMO-CS normal": {
+   "sessions": 1,
+   "pairs": 3,
+   "progress": 3,
+   "repeat": 0
+  },
+  "test-nc DEMO-CS stall": {
+   "sessions": 2,
+   "pairs": 28,
+   "progress": 2,
+   "repeat": 26
+  },
+  "test-nc DEMO-LR stall": {
+   "sessions": 1,
+   "pairs": 3,
+   "progress": 3,
+   "repeat": 0
+  },
+  "test-nc DEMO-MR normal": {
+   "sessions": 1,
+   "pairs": 27,
+   "progress": 2,
+   "repeat": 25
+  },
+  "test-nc DEMO-MR stall": {
+   "sessions": 2,
+   "pairs": 41,
+   "progress": 6,
+   "repeat": 35
+  }
+ },
+ "nc_test_share": {
+  "sessions": 0.206,
+  "pairs": 0.205
+ },
+ "test_nc_sessions": [
+  "DEMO-CS-normal-v3-1aaa1b70b7ea4c34ad8f596ae6710707",
+  "DEMO-CS-stall-v2-ffa2e9df1208497d9994f209dbdb1a0c",
+  "DEMO-CS-stall-v3-30a272cf632d465b9204474303134350",
+  "DEMO-LR-stall-v2-0d9360f5f3734605b02c5f6b035b33af",
+  "DEMO-MR-normal-v2-0e7e8256cee543e689dd888f9cabf009",
+  "DEMO-MR-stall-v2-515064b77fca47d3920d9b7a31c8f178",
+  "DEMO-MR-stall-v2-855b1dadfd074e50bf5a9ea7767218c8"
+ ],
+ "train_folds": {
+  "0": 183,
+  "1": 208,
+  "2": 169,
+  "3": 158,
+  "4": 155
+ },
+ "dialogue_train_pairs": 508,
+ "domain_table_has_nc_tasks": true,
+ "session_leaks": []
+}
