@@ -590,7 +590,7 @@ def create_app(*, accounts=None, live=None, transport=None, workdir=None, max_bo
         # Local only (Caddy does not route it) : no project, key or address in it.
         return {'status': 'ok', 'gateway_version': GATEWAY_VERSION, 'inner_proxies': len(gateway.inner),
                 'sessions': len(gateway.routes), 'open_sessions': gateway.open_sessions(),
-                'idle_seconds': int(time.monotonic() - gateway.last_request)}
+                'idle_seconds': round(time.monotonic() - gateway.last_request)}
 
     return app
 
