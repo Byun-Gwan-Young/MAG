@@ -1,0 +1,205 @@
+{
+ "replay_version": "ce-replay-v1",
+ "rule": {
+  "threshold": 0.9,
+  "max_cancels": 2,
+  "tasks": "CS · MR · LR only"
+ },
+ "checks": {
+  "demo_sessions": 67,
+  "nc_sessions": 39,
+  "nc_skipped": [
+   {
+    "session_id": "DEMO-MR-stall-v2-855b1dadfd074e50bf5a9ea7767218c8",
+    "plan_id": "nc-trial-v2",
+    "termination_reason": null,
+    "why": "no session.json (proxy log)"
+   },
+   {
+    "session_id": "DEMO-MR-stall-v2-bbf630cb94cf40b183a1b993aa54a10f",
+    "plan_id": "nc-main-v2",
+    "termination_reason": "user_interrupted",
+    "why": "no session.json (proxy log)"
+   }
+  ],
+  "demo_stop_steps_match_raw": true
+ },
+ "table": {
+  "demo67": {
+   "rule only": {
+    "preservation": "20/24",
+    "preservation_rate": 0.8333,
+    "detection_observe": "8/9",
+    "detection_block": "5/5",
+    "saving_mean_detected": 0.6077,
+    "first_stop_steps": [
+     10,
+     10,
+     12,
+     14,
+     14,
+     14,
+     18,
+     19
+    ],
+    "first_stop_median": 14.0,
+    "cancels": 0,
+    "sessions_with_cancel": 0,
+    "pairs_without_probability": 0
+   },
+   "human labels": {
+    "preservation": "22/24",
+    "preservation_rate": 0.9167,
+    "detection_observe": "8/9",
+    "detection_block": "5/5",
+    "saving_mean_detected": 0.6077,
+    "first_stop_steps": [
+     10,
+     10,
+     12,
+     14,
+     14,
+     14,
+     18,
+     19
+    ],
+    "first_stop_median": 14.0,
+    "cancels": 3,
+    "sessions_with_cancel": 3,
+    "pairs_without_probability": 0
+   }
+  },
+  "nc41": {
+   "rule only": {
+    "preservation": "11/15",
+    "preservation_rate": 0.7333,
+    "detection_observe": "15/15",
+    "detection_block": "0/0",
+    "saving_mean_detected": 0.8268,
+    "first_stop_steps": [
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     7,
+     9,
+     9,
+     9,
+     9,
+     9,
+     9
+    ],
+    "first_stop_median": 6,
+    "cancels": 0,
+    "sessions_with_cancel": 0,
+    "pairs_without_probability": 0
+   },
+   "human labels": {
+    "preservation": "15/15",
+    "preservation_rate": 1.0,
+    "detection_observe": "15/15",
+    "detection_block": "0/0",
+    "saving_mean_detected": 0.764,
+    "first_stop_steps": [
+     6,
+     6,
+     6,
+     6,
+     8,
+     8,
+     9,
+     10,
+     10,
+     11,
+     11,
+     11,
+     11,
+     12,
+     13
+    ],
+    "first_stop_median": 10,
+    "cancels": 25,
+    "sessions_with_cancel": 16,
+    "pairs_without_probability": 0
+   }
+  },
+  "all": {
+   "rule only": {
+    "preservation": "31/39",
+    "preservation_rate": 0.7949,
+    "detection_observe": "23/24",
+    "detection_block": "5/5",
+    "saving_mean_detected": 0.7506,
+    "first_stop_steps": [
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     7,
+     9,
+     9,
+     9,
+     9,
+     9,
+     9,
+     10,
+     10,
+     12,
+     14,
+     14,
+     14,
+     18,
+     19
+    ],
+    "first_stop_median": 9,
+    "cancels": 0,
+    "sessions_with_cancel": 0,
+    "pairs_without_probability": 0
+   },
+   "human labels": {
+    "preservation": "37/39",
+    "preservation_rate": 0.9487,
+    "detection_observe": "23/24",
+    "detection_block": "5/5",
+    "saving_mean_detected": 0.7096,
+    "first_stop_steps": [
+     6,
+     6,
+     6,
+     6,
+     8,
+     8,
+     9,
+     10,
+     10,
+     10,
+     10,
+     11,
+     11,
+     11,
+     11,
+     12,
+     12,
+     13,
+     14,
+     14,
+     14,
+     18,
+     19
+    ],
+    "first_stop_median": 11,
+    "cancels": 28,
+    "sessions_with_cancel": 19,
+    "pairs_without_probability": 0
+   }
+  }
+ }
+}
