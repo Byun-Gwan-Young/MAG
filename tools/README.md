@@ -45,6 +45,21 @@
 | [`p0_4_info_items_options.py`](p0_4_info_items_options.py) | P0-4 `info_items` 선택지 비교 | `venv/bin/python -B tools/p0_4_info_items_options.py --output /tmp/p0-4.json` |
 | [`write_criteria_snapshot.py`](write_criteria_snapshot.py) | 판정 기준 동결 기록(`docs/criteria/`) 쓰기. 이전 버전은 덮어쓰지 않음. 동결 파일을 쓰므로 PM 지시 없이 돌리지 않는다 | `venv/bin/python -B tools/write_criteria_snapshot.py --config guardrail-deadlock-v0.3-kmu.yaml` |
 
+## 모델 트랙 — 2 차 판정 학습 · 증류 · INT8 · 재생 (C-19-12)
+
+데이터 (발화 원문 · 라벨) 는 git 제외 폴더 `docs/handoff/model-track/` 에만 있고, 도구는 개수 · 비율만 출력합니다. 학습 · 증류 · INT8 은 torch 가 있는 모델 트랙 venv (`docs/handoff/model-track/bge-ft/.venv/bin/python`) 로 돌립니다. 순서와 Colab 명령은 [`reports/c19-12/pm-commands.md`](../reports/c19-12/pm-commands.md).
+
+| 도구 | 하는 일 | 대표 명령 |
+|---|---|---|
+| [`extract_pairs.py`](extract_pairs.py) | 데모 세션에서 같은 역할 연속 발화 쌍 뽑기 (라벨용, DM-118) | `venv/bin/python -B tools/extract_pairs.py --prefix nc- --out /tmp/pairs.jsonl` |
+| [`nc_labels.py`](nc_labels.py) | 비코딩 498 쌍 라벨 확정 : 일치도를 다시 계산해 DM-123 과 대조, 다수결 라벨 파일 | `venv/bin/python -B tools/nc_labels.py` |
+| [`ce_data_v2.py`](ce_data_v2.py) | 학습 데이터 v2 : main-v1 + nc498, nc 는 세션 단위로 시험 `test-nc` 를 뗌 | `venv/bin/python -B tools/ce_data_v2.py --dry-run` |
+| [`ce_train.py`](ce_train.py) | 선생 (BGE-reranker) 학습 · 5 겹 valid · test 1 회 · 학습셋 바깥 예측, 공용 학습 루프 · 채점기 | `reports/c19-12/pm-commands.md` ② |
+| [`ce_distill.py`](ce_distill.py) | 학생 (mMiniLMv2 6 층) 증류 : 정답 BCE + 선생 확률 (온도 KL 또는 MSE) | `reports/c19-12/pm-commands.md` ③ |
+| [`ce_int8.py`](ce_int8.py) | ONNX 내보내기 → 동적 INT8 → fp32 와 정확도 · 크기 · CPU 2 스레드 지연 비교 | `reports/c19-12/pm-commands.md` ③ |
+| [`ce_replay.py`](ce_replay.py) | 2 차 판정 재생 (데모 67 + 비코딩) : 규칙만 / 사람 라벨 / 모델 예측 | `venv/bin/python -B tools/ce_replay.py run` |
+| [`ce_common.py`](ce_common.py) | 위 도구가 함께 쓰는 쌍 ID · κ · 단어 겹침 규칙 (모듈) | 다른 도구가 가져다 씀 |
+
 ## probe (사용자가 실행, 외부 호출)
 
 | 도구 | 하는 일 |
