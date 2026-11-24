@@ -38,11 +38,13 @@ size=$(wc -c < "$bundle" | tr -d ' ')
 (( size <= MAX_BYTES )) || die "묶음이 상한 ($MAX_BYTES 바이트) 을 넘는다"
 
 names=$(tar -tzf "$bundle" 2>/dev/null) || die "gzip tar 묶음이 아니다"
-if printf '%s\n' "$names" | grep -q -e '^/' -e '^\.\./' -e '/\.\./' -e '/\.\.$' -e '^\.\.$'; then
+# Here-strings, not `printf … | grep -q` : grep -q stops at the first match, printf then dies of SIGPIPE on a long
+# list, and with pipefail the pipeline reads as "no match" (a real bundle lists hundreds of files).
+if grep -q -e '^/' -e '^\.\./' -e '/\.\./' -e '/\.\.$' -e '^\.\.$' <<< "$names"; then
     die "묶음에 폴더 밖을 가리키는 경로가 있다"
 fi
 for needed in DEPLOY_INFO.json deploy/aws/remote-install.sh deploy/aws/slots.sh; do
-    printf '%s\n' "$names" | grep -qxF "$needed" || die "묶음에 $needed 가 없다"
+    grep -qxF "$needed" <<< "$names" || die "묶음에 $needed 가 없다"
 done
 
 domain=$(sed -n 's/^GUARDRAIL_DOMAIN=//p' "$P/etc/guardrail/caddy.env" 2>/dev/null | tail -n 1)

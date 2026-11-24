@@ -276,7 +276,7 @@ prune() {    # keep the newest KEEP_RELEASES and whatever a slot or app still po
            done)
     ls -1dt "$OPT"/releases/*/ 2>/dev/null | tail -n +$(( KEEP_RELEASES + 1 )) | while read -r old; do
         old=$(cd "$old" && pwd -P)
-        printf '%s\n' "$keep" | grep -qxF "$old" || rm -rf -- "$old"
+        grep -qxF "$old" <<< "$keep" || rm -rf -- "$old"
     done
 }
 
