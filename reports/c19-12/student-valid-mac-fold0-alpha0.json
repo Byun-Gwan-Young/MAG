@@ -1,0 +1,112 @@
+{
+ "kind": "student",
+ "model": "docs/handoff/model-track/hf/mMiniLMv2-L6-H384",
+ "eval": "valid",
+ "train_domain": "all",
+ "settings": {
+  "model": "docs/handoff/model-track/hf/mMiniLMv2-L6-H384",
+  "data": "docs/handoff/model-track/bge-ft/main-v2.jsonl",
+  "eval": "valid",
+  "fold": 0,
+  "train_domain": "all",
+  "epochs": 4,
+  "lr": 5e-05,
+  "bs": 8,
+  "accum": 2,
+  "max_len": 224,
+  "seed": 20261125,
+  "out": "docs/handoff/model-track/bge-ft/runs/student-v2",
+  "freeze_layers": 0,
+  "freeze_embeddings": false,
+  "device": "auto",
+  "no_checkpointing": false,
+  "tag": "mac-fold0-alpha0",
+  "teacher": null,
+  "alpha": 0.0,
+  "temperature": 2.0,
+  "soft": "kl"
+ },
+ "data": "main-v2.jsonl",
+ "train_seconds": 90,
+ "folds": [
+  {
+   "pairs": 183,
+   "accuracy": 0.8033,
+   "word_overlap_rule": {
+    "threshold": 0.3415,
+    "accuracy": 0.8907
+   },
+   "dialogue": {
+    "pairs": 143,
+    "model": 0.8182,
+    "rule": 0.8951
+   },
+   "by_domain": {
+    "coding": {
+     "pairs": 40,
+     "model": 0.75,
+     "rule": 0.875
+    },
+    "customer-support": {
+     "pairs": 56,
+     "model": 0.6607,
+     "rule": 0.8036
+    },
+    "literature-review": {
+     "pairs": 27,
+     "model": 1.0,
+     "rule": 0.963
+    },
+    "market-research": {
+     "pairs": 60,
+     "model": 0.8833,
+     "rule": 0.95
+    }
+   },
+   "by_split": {
+    "train": {
+     "pairs": 183,
+     "model": 0.8033,
+     "rule": 0.8907,
+     "dialogue_pairs": 143,
+     "dialogue_model": 0.8182,
+     "dialogue_rule": 0.8951
+    }
+   },
+   "name": "fold0",
+   "train_pairs": 690,
+   "log": [
+    {
+     "epoch": 1,
+     "loss": 0.6491,
+     "seconds": 17
+    },
+    {
+     "epoch": 2,
+     "loss": 0.4712,
+     "seconds": 31
+    },
+    {
+     "epoch": 3,
+     "loss": 0.42,
+     "seconds": 45
+    },
+    {
+     "epoch": 4,
+     "loss": 0.3874,
+     "seconds": 59
+    }
+   ]
+  }
+ ],
+ "pooled": {
+  "pairs": 183,
+  "accuracy": 0.8033,
+  "word_overlap_rule_accuracy": 0.8907,
+  "dialogue": {
+   "pairs": 143,
+   "model": 0.8182,
+   "rule": 0.8951
+  }
+ }
+}
