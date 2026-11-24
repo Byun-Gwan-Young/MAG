@@ -1,0 +1,28 @@
+{
+ "stats": {
+  "pairs": 498,
+  "abstain": {
+   "성상혁": 0,
+   "이정은": 1,
+   "ai": 0
+  },
+  "human_pairs_compared": 497,
+  "human_agreement": 0.9759,
+  "human_kappa": 0.929,
+  "human_ai_kappa": [
+   0.929,
+   0.928
+  ],
+  "fleiss_pairs": 497,
+  "fleiss_kappa": 0.928,
+  "all_three_same": 479,
+  "humans_differ": 13,
+  "humans_differ_both_labelled": 12,
+  "majority": {
+   "진전": 106,
+   "같은 주장 반복": 392
+  },
+  "undecided": 0
+ },
+ "dm123_mismatches": []
+}
