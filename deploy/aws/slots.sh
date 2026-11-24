@@ -124,6 +124,9 @@ start_slot() {    # start_slot SLOT RELEASE
     slot_ports "$slot"
     stop_slot "$slot"
     mkdir -p "$OPT/slots" "$ETC" "$UNITS"
+    # The services run as user guardrail and enter /opt/guardrail/slots/SLOT : the folder must be traversable even when
+    # the caller's umask is 077 (the deploy-only command sets it), and a folder an earlier run made 700 is opened up.
+    chmod 755 "$OPT/slots"
     tmp=$(umask 027 && mktemp "$ETC/slot-$slot.env.XXXXXX")
     printf 'GUARDRAIL_API_PORT=%s\nGUARDRAIL_BACKEND_PORT=%s\nGUARDRAIL_GATEWAY_PORT=%s\n' \
         "$API_PORT" "$BACKEND_PORT" "$GATEWAY_PORT" > "$tmp"
